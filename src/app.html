@@ -1,0 +1,999 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Command Center</title>
+<meta name="description" content="Live call revenue across Retreaver, Ringba and TrackDrive.">
+<meta name="theme-color" content="#f1f4f3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0c0f11" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Command">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icons/apple-touch-180.png">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root{
+  color-scheme: light;
+  --ground:#f1f4f3; --surface:#ffffff; --surface-2:#f8faf9;
+  --ink:#0f1416; --ink-2:#4d5a5c; --ink-3:#78878a;
+  --rule:#e0e5e4; --rule-2:#c7d0cf;
+  --accent:#00747f; --accent-ink:#00747f; --accent-soft:rgba(0,116,127,.09);
+  --good:#0ca30c; --good-ink:#0a7a0a;
+  --warn:#fab219; --warn-ink:#8a6209;
+  --crit:#d03b3b; --crit-ink:#b02f2f;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
+  --shadow:0 1px 2px rgba(15,20,22,.05), 0 12px 28px -20px rgba(15,20,22,.35);
+  --mono:"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --display:"Archivo", "IBM Plex Sans", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --ground:#0c0f11; --surface:#161a1d; --surface-2:#1c2124;
+    --ink:#eef2f2; --ink-2:#a6b3b5; --ink-3:#7d8b8d;
+    --rule:#272e31; --rule-2:#3a4347;
+    --accent:#2fbccc; --accent-ink:#2fbccc; --accent-soft:rgba(47,188,204,.12);
+    --good:#0ca30c; --good-ink:#3ec13e;
+    --warn:#fab219; --warn-ink:#fab219;
+    --crit:#e05f5f; --crit-ink:#e88080;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 28px -20px rgba(0,0,0,.8);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --ground:#0c0f11; --surface:#161a1d; --surface-2:#1c2124;
+  --ink:#eef2f2; --ink-2:#a6b3b5; --ink-3:#7d8b8d;
+  --rule:#272e31; --rule-2:#3a4347;
+  --accent:#2fbccc; --accent-ink:#2fbccc; --accent-soft:rgba(47,188,204,.12);
+  --good:#0ca30c; --good-ink:#3ec13e;
+  --warn:#fab219; --warn-ink:#fab219;
+  --crit:#e05f5f; --crit-ink:#e88080;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 28px -20px rgba(0,0,0,.8);
+}
+
+*{box-sizing:border-box;}
+html,body{overscroll-behavior-y:contain;}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:var(--sans); font-size:15px; line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+.wrap{max-width:1400px;margin:0 auto;padding:0 14px 56px;}
+@media (min-width:760px){ .wrap{padding:0 20px 64px;} body{font-size:14px;} }
+
+/* ---------- header ---------- */
+.bar{
+  position:sticky;top:0;z-index:40;
+  background:color-mix(in srgb, var(--ground) 90%, transparent);
+  backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--rule);
+  padding:calc(10px + env(safe-area-inset-top)) 14px 10px;
+  margin-bottom:14px;
+}
+.bar-in{max-width:1400px;margin:0 auto;display:flex;align-items:center;gap:10px;}
+.brand{display:flex;align-items:baseline;gap:8px;margin-right:auto;min-width:0;}
+.brand h1{
+  font-family:var(--display);font-weight:700;font-size:17px;letter-spacing:-.02em;margin:0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;
+}
+.brand .day{font-family:var(--mono);font-size:10px;color:var(--ink-3);letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;}
+@media (max-width:560px){
+  .brand .day{display:none;}
+  .brand h1{font-size:15px;}
+  button.act#refresh{padding:8px 10px;font-size:14px;letter-spacing:0;}
+  #refresh .word{display:none;}
+}
+@media (min-width:561px){ #refresh .glyph{display:none;} }
+
+/* Columns that earn their place on a wide screen but not on a phone, where
+   pushing revenue off the right edge would be the wrong trade. */
+@media (max-width:560px){ .opt{display:none;} }
+
+.onair{
+  display:inline-flex;align-items:baseline;gap:7px;flex:none;
+  border:1px solid var(--rule-2);border-radius:8px;background:var(--surface);
+  padding:5px 11px 5px 10px;
+}
+.onair .dot{width:8px;height:8px;border-radius:50%;background:var(--ink-3);align-self:center;position:relative;flex:none;}
+.onair .n{font-family:var(--display);font-weight:700;font-size:16px;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1;}
+.onair .l{font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);white-space:nowrap;}
+.onair[data-state="live"]{border-color:var(--good);background:color-mix(in srgb, var(--good) 8%, var(--surface));}
+.onair[data-state="live"] .dot{background:var(--good);}
+.onair[data-state="live"] .dot::after{
+  content:"";position:absolute;inset:-4px;border-radius:50%;border:1px solid var(--good);
+  animation:ring 1.8s ease-out infinite;
+}
+@keyframes ring{0%{transform:scale(.6);opacity:.7}100%{transform:scale(1.5);opacity:0}}
+@media (prefers-reduced-motion: reduce){ .onair[data-state="live"] .dot::after{animation:none;opacity:.4} }
+.onair[data-state="idle"] .n,.onair[data-state="down"] .n{color:var(--ink-3);}
+
+button.act{
+  font-family:var(--mono);font-size:11px;letter-spacing:.05em;text-transform:uppercase;
+  border:1px solid var(--rule-2);background:var(--surface);color:var(--ink-2);
+  border-radius:8px;padding:8px 11px;cursor:pointer;flex:none;
+  min-height:36px;
+}
+button.act:hover{border-color:var(--accent);color:var(--accent-ink);}
+button.act:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+button.act[aria-busy="true"]{opacity:.5;}
+
+/* ---------- cards ---------- */
+.card{
+  background:var(--surface);border:1px solid var(--rule);border-radius:12px;
+  box-shadow:var(--shadow);overflow:hidden;margin-bottom:12px;
+}
+.card > header{
+  display:flex;align-items:center;gap:10px;
+  padding:12px 14px;border-bottom:1px solid var(--rule);background:var(--surface-2);
+}
+.card > header h2{
+  margin:0;font-family:var(--display);font-weight:600;font-size:12px;
+  letter-spacing:.04em;text-transform:uppercase;color:var(--ink-2);
+}
+.card > header .meta{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--ink-3);}
+.eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3);}
+
+/* ---------- hero ---------- */
+.hero{padding:18px 16px 16px;}
+.hero .big{
+  font-family:var(--display);font-weight:700;
+  font-size:clamp(38px,12vw,58px);letter-spacing:-.035em;line-height:1.02;margin:6px 0 3px;
+}
+.delta{font-family:var(--mono);font-size:12px;display:flex;align-items:baseline;gap:7px;color:var(--ink-2);line-height:1.4;}
+.delta .arrow{font-size:12px;line-height:1;flex:none;}
+.delta.up{color:var(--good-ink);} .delta.down{color:var(--crit-ink);}
+.yday{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);margin-top:3px;font-variant-numeric:tabular-nums;}
+.yday b{color:var(--ink-2);font-weight:600;}
+.splitbar{display:flex;height:8px;border-radius:4px;overflow:hidden;gap:2px;margin-top:16px;}
+.splitbar span{display:block;border-radius:2px;}
+.splitrow{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11.5px;color:var(--ink-2);margin-top:6px;}
+.splitrow .sw{width:9px;height:9px;border-radius:2px;flex:none;}
+.splitrow .v{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--ink);}
+
+/* ---------- kpis ---------- */
+.kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:12px;}
+@media (min-width:700px){ .kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;} }
+.kpi{background:var(--surface);border:1px solid var(--rule);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow);}
+.kpi .v{font-family:var(--display);font-weight:600;font-size:24px;letter-spacing:-.02em;margin-top:4px;line-height:1.1;}
+.kpi .n{font-family:var(--mono);font-size:10px;color:var(--ink-3);margin-top:3px;}
+.kpi .n b{color:var(--ink-2);font-weight:600;}
+.kpi .n .pos{color:var(--good-ink);} .kpi .n .neg2{color:var(--crit-ink);}
+.kpi.lead{grid-column:span 2;border-color:var(--accent);background:linear-gradient(var(--accent-soft),var(--accent-soft)),var(--surface);}
+.kpi.lead .eyebrow{color:var(--accent-ink);}
+.kpi.lead .v{font-size:30px;}
+
+/* ---------- chart ---------- */
+.chartwrap{position:relative;padding:12px 10px 6px;}
+.chartwrap svg{display:block;width:100%;}
+.legend{display:flex;gap:14px;flex-wrap:wrap;padding:2px 14px 12px;}
+.legend span{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--ink-2);}
+.legend i{width:9px;height:9px;border-radius:2px;display:block;}
+
+/* ---------- tabs ---------- */
+.tabs{display:flex;gap:4px;padding:10px 12px;border-bottom:1px solid var(--rule);background:var(--surface-2);overflow-x:auto;}
+.tabs button{
+  font-family:var(--mono);font-size:11px;letter-spacing:.05em;text-transform:uppercase;
+  border:1px solid transparent;background:transparent;color:var(--ink-3);
+  border-radius:7px;padding:7px 11px;cursor:pointer;white-space:nowrap;min-height:34px;
+}
+.tabs button[aria-selected="true"]{background:var(--surface);border-color:var(--rule-2);color:var(--ink);}
+.tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+
+/* ---------- tables ---------- */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+table{width:100%;border-collapse:collapse;font-size:13px;}
+th{
+  font-family:var(--mono);font-weight:500;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink-3);text-align:right;padding:9px 12px;border-bottom:1px solid var(--rule);white-space:nowrap;
+}
+th:first-child{text-align:left;}
+td{padding:10px 12px;border-bottom:1px solid var(--rule);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+td:first-child{text-align:left;}
+tbody tr:last-child td{border-bottom:none;}
+.name{display:flex;align-items:center;gap:8px;min-width:0;}
+.name .sw{width:3px;height:20px;border-radius:2px;flex:none;}
+.txt{display:inline-block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:22ch;vertical-align:bottom;}
+@media (min-width:760px){ .txt{max-width:30ch;} }
+.sub{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);}
+.money{font-family:var(--mono);font-size:12.5px;}
+.neg{color:var(--crit-ink);}
+.barcell{position:relative;}
+.barcell .fill{position:absolute;left:0;top:50%;transform:translateY(-50%);height:60%;border-radius:2px;opacity:.16;}
+.barcell .val{position:relative;}
+
+/* ---------- alerts ---------- */
+.alert{display:grid;grid-template-columns:3px 1fr;border-bottom:1px solid var(--rule);}
+.alert:last-child{border-bottom:none;}
+.alert .stripe{background:var(--ink-3);}
+.alert[data-sev="critical"] .stripe{background:var(--crit);}
+.alert[data-sev="warning"] .stripe{background:var(--warn);}
+.alert .c{padding:11px 14px;display:flex;flex-direction:column;gap:3px;}
+.alert .t{display:flex;align-items:center;gap:7px;font-weight:600;font-size:13px;flex-wrap:wrap;}
+.alert .tag{
+  font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;
+  border:1px solid var(--rule-2);border-radius:4px;padding:1px 5px;color:var(--ink-3);font-weight:500;
+}
+.alert[data-sev="critical"] .tag{color:var(--crit-ink);border-color:var(--crit);}
+.alert[data-sev="warning"] .tag{color:var(--warn-ink);border-color:var(--warn);}
+.alert .d{font-size:12.5px;color:var(--ink-2);}
+.alert .d b{font-family:var(--mono);font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums;}
+
+/* ---------- feed ---------- */
+.feed{max-height:60vh;overflow-y:auto;}
+.feed td:first-child{font-family:var(--mono);font-size:11px;color:var(--ink-3);}
+.feed th:nth-child(2),.feed th:nth-child(3),.feed td:nth-child(2),.feed td:nth-child(3){text-align:left;}
+.pill{
+  display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:9.5px;
+  letter-spacing:.05em;text-transform:uppercase;border-radius:4px;padding:2px 6px;
+  border:1px solid var(--rule-2);color:var(--ink-2);
+}
+.pill .d{width:5px;height:5px;border-radius:50%;}
+.pill[data-k="good"] .d{background:var(--good);}
+.pill[data-k="warn"] .d{background:var(--warn);}
+.pill[data-k="crit"] .d{background:var(--crit);}
+.pill[data-k="idle"] .d{background:var(--ink-3);}
+
+/* ---------- banners / states ---------- */
+.banner{
+  display:flex;gap:10px;border:1px solid var(--warn);border-left-width:3px;border-radius:10px;
+  background:var(--surface);padding:11px 14px;margin-bottom:12px;box-shadow:var(--shadow);
+}
+.banner[data-sev="critical"]{border-color:var(--crit);}
+.banner .bc{display:flex;flex-direction:column;gap:3px;}
+.banner .bt{font-weight:600;font-size:13.5px;}
+.banner .bd{font-size:12.5px;color:var(--ink-2);}
+.banner .code{font-family:var(--mono);font-size:10px;color:var(--ink-3);word-break:break-word;}
+.state{padding:22px 16px;text-align:center;color:var(--ink-2);font-size:13px;}
+.state .h{font-weight:600;color:var(--ink);margin-bottom:4px;}
+.skel{height:12px;border-radius:3px;background:var(--rule);opacity:.6;animation:sh 1.4s ease-in-out infinite;}
+@keyframes sh{0%,100%{opacity:.35}50%{opacity:.7}}
+@media (prefers-reduced-motion: reduce){ .skel{animation:none} }
+
+.foot{margin-top:18px;font-size:12px;color:var(--ink-3);}
+.foot p{margin:0 0 7px;max-width:70ch;}
+.install{
+  display:none;align-items:center;gap:10px;border:1px dashed var(--accent);border-radius:10px;
+  padding:11px 14px;margin-bottom:12px;background:var(--accent-soft);font-size:13px;
+}
+.install.on{display:flex;}
+.install button{margin-left:auto;}
+
+@media (min-width:1080px){
+  .cols{display:grid;grid-template-columns:1.35fr 1fr;gap:16px;align-items:start;}
+  .cols > div{min-width:0;}
+}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="bar-in">
+    <div class="brand">
+      <h1>Command Center</h1>
+      <span class="day" id="day"></span>
+    </div>
+    <div class="onair" id="onair" data-state="idle">
+      <span class="dot"></span><span class="n" id="onairN">—</span><span class="l" id="onairL">on air</span>
+    </div>
+    <button class="act" id="refresh" type="button" aria-label="Refresh">
+      <span class="word">Refresh</span><span class="glyph" aria-hidden="true">↻</span>
+    </button>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="install" id="install">
+    <span>Add Command Center to your home screen for a full-screen, one-tap view.</span>
+    <button class="act" id="installBtn" type="button">Install</button>
+  </div>
+
+  <div id="banners"></div>
+
+  <section class="card">
+    <div class="hero">
+      <span class="eyebrow">Revenue booked today</span>
+      <div class="big" id="heroRev">—</div>
+      <div class="delta" id="heroDelta"><span class="arrow">·</span><span>loading…</span></div>
+      <div class="yday" id="heroYday"></div>
+      <div class="splitbar" id="splitBar"></div>
+      <div id="splitRows"></div>
+    </div>
+  </section>
+
+  <section class="kpis" id="kpis"></section>
+
+  <section class="card">
+    <header><h2>Revenue by hour</h2><span class="meta" id="chartMeta">local time</span></header>
+    <div class="chartwrap"><svg id="chart" role="img" aria-label="Revenue by hour, stacked by platform"></svg></div>
+    <div class="legend" id="legend"></div>
+  </section>
+
+  <div class="cols">
+    <div>
+      <section class="card">
+        <div class="tabs" role="tablist">
+          <button role="tab" data-tab="publishers" aria-selected="true">Publishers</button>
+          <button role="tab" data-tab="buyers" aria-selected="false">Buyers</button>
+          <button role="tab" data-tab="campaigns" aria-selected="false">Campaigns</button>
+        </div>
+        <div class="scroll" id="tableBody"></div>
+      </section>
+    </div>
+    <div>
+      <section class="card">
+        <header><h2>Alerts</h2><span class="meta" id="alertMeta"></span></header>
+        <div id="alertBody"></div>
+      </section>
+
+      <section class="card">
+        <header><h2>Live calls</h2><span class="meta" id="feedMeta"></span></header>
+        <div class="feed scroll" id="feedBody"></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="foot" id="foot">
+    <p><b>Where the numbers come from.</b> Retreaver and Ringba roll up server-side over your local calendar day; TrackDrive is counted from call records. Retreaver caches its report responses, so figures are near-real-time rather than to the second.</p>
+    <p><b>Long &amp; unpaid</b> counts calls over five minutes that booked $0 across the last 48 hours — the transfer-failure proxy. It can't tell a broken transfer from a buyer declining to pay.</p>
+    <p id="stamp"></p>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var SERIES = [
+    {k:"retreaver",  label:"Retreaver",  v:"--s1"},
+    {k:"ringba",     label:"Ringba",     v:"--s2"},
+    {k:"trackdrive", label:"TrackDrive", v:"--s3"}
+  ];
+  var LABEL = {retreaver:"Retreaver", ringba:"Ringba", trackdrive:"TrackDrive"};
+
+  var S = { snap:null, error:null, loading:true, tab:"publishers", offlineAt:null };
+
+  /* ---------- formatting ---------- */
+  var m0 = new Intl.NumberFormat(undefined,{style:"currency",currency:"USD",maximumFractionDigits:0});
+  var m2 = new Intl.NumberFormat(undefined,{style:"currency",currency:"USD",minimumFractionDigits:2,maximumFractionDigits:2});
+  var i0 = new Intl.NumberFormat(undefined,{maximumFractionDigits:0});
+  function M0(v){ return m0.format(v||0); }
+  function M2(v){ return m2.format(v||0); }
+  function NI(v){ return i0.format(v||0); }
+  function PC(v){ if(v==null||!isFinite(v)) return "—"; if(v===0) return "0%"; return (v*100).toFixed(v<0.1?1:0)+"%"; }
+  function DUR(s){ s=Math.max(0,Math.round(s||0)); var m=Math.floor(s/60); return m+":"+String(s%60).padStart(2,"0"); }
+  function esc(t){ return String(t==null?"":t).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
+  function cssv(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim()||"#888"; }
+  function shortName(n){ return String(n||"").replace(/^ID\d+\s*[-–]\s*/,"").replace(/\s*[-–]\s*\[[^\]]*\]\s*$/,"").trim()||"Unnamed"; }
+
+  /* ---------- time window ---------- */
+  function windowParams(){
+    var now = new Date();
+    var dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var p = new URLSearchParams();
+    p.set("start", dayStart.toISOString());
+    p.set("end", new Date(dayStart.getTime()+86400000).toISOString());
+    p.set("prevStart", new Date(dayStart.getTime()-86400000).toISOString());
+    p.set("weekStart", new Date(dayStart.getTime()-7*86400000).toISOString());
+    p.set("monthStart", new Date(now.getFullYear(), now.getMonth(), 1).toISOString());
+    p.set("prevMonthStart", new Date(now.getFullYear(), now.getMonth()-1, 1).toISOString());
+    p.set("tzOffset", String(now.getTimezoneOffset()));
+    return p;
+  }
+  function monthBounds(){
+    var n = new Date();
+    return {
+      start: new Date(n.getFullYear(), n.getMonth(), 1),
+      end:   new Date(n.getFullYear(), n.getMonth()+1, 1),
+      prev:  new Date(n.getFullYear(), n.getMonth()-1, 1)
+    };
+  }
+  function monthFrac(){
+    var b = monthBounds();
+    return Math.min(1, Math.max(0.005, (Date.now()-b.start)/(b.end-b.start)));
+  }
+  function stampDay(){
+    document.getElementById("day").textContent =
+      new Date().toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});
+  }
+  stampDay();
+
+  /* ---------- data ---------- */
+  function sources(){ return (S.snap && S.snap.sources) || {}; }
+  function src(k){ var s = sources()[k]; return (s && s.ok) ? s : null; }
+
+  // Only `primary` sources add up. The outside accounts are buyers Retreaver
+  // already routes to, so their calls are inside Retreaver's numbers — summing
+  // them would count the same call twice. They are compared, never added.
+  function isPrimary(k){
+    var raw = sources()[k];
+    return !raw || raw.role !== "reconciliation";
+  }
+
+  function combined(field){
+    var out = {calls:0,revenue:0,payout:0,cost:0,profit:0,converted:0,inProgress:0}, any=false;
+    SERIES.forEach(function(s){
+      if(!isPrimary(s.k)) return;
+      var d = src(s.k); if(!d) return;
+      var t = field ? d[field] : d.totals;
+      if(!t) return;
+      any = true;
+      out.calls+=t.calls||0; out.revenue+=t.revenue||0; out.payout+=t.payout||0;
+      out.cost+=t.cost||0; out.profit+=t.profit||0; out.converted+=t.converted||0;
+      out.inProgress+=t.inProgress||0;
+    });
+    out.any = any;
+    return out;
+  }
+
+  function combinedHourly(){
+    var out = [];
+    for(var h=0;h<24;h++) out.push({h:h, retreaver:0, ringba:0, trackdrive:0});
+    SERIES.forEach(function(s){
+      if(!isPrimary(s.k)) return;
+      var d = src(s.k); if(!d || !Array.isArray(d.hourly)) return;
+      d.hourly.forEach(function(v,h){ if(h<24) out[h][s.k] += v||0; });
+    });
+    return out;
+  }
+
+  function yesterdayFigures(){
+    var now = new Date(), curH = now.getHours(), frac = now.getMinutes()/60;
+    var full=0, toNow=0, have=false;
+    SERIES.forEach(function(s){
+      if(!isPrimary(s.k)) return;
+      var d = src(s.k); if(!d || !d.yesterday) return;
+      have = true;
+      full += (d.yesterday.totals && d.yesterday.totals.revenue) || 0;
+      var hrs = d.yesterday.hourly || [];
+      for(var h=0; h<=curH && h<24; h++){
+        var v = hrs[h]||0;
+        toNow += (h<curH) ? v : v*frac;
+      }
+    });
+    return have ? {full:full, toNow:toNow} : null;
+  }
+
+  function liveNow(){
+    var n=0, have=false;
+    SERIES.forEach(function(s){
+      if(!isPrimary(s.k)) return;
+      var d = src(s.k); if(!d) return;
+      if(typeof d.live === "number"){ have=true; n += d.live; }
+    });
+    return have ? n : null;
+  }
+
+  function mergedRows(kind){
+    var out = [];
+    SERIES.forEach(function(s){
+      if(!isPrimary(s.k)) return;
+      var d = src(s.k); if(!d) return;
+      (d[kind]||[]).forEach(function(r){
+        if(!r.calls) return;
+        out.push({src:s.k, label:shortName(r.label), r:r});
+      });
+    });
+    out.sort(function(a,b){ return (b.r.revenue||0)-(a.r.revenue||0); });
+    return out;
+  }
+
+  /* ---------- alerts ---------- */
+  function buildAlerts(){
+    var A = [], ret = src("retreaver");
+    if(ret){
+      var base = {};
+      (ret.baseline7d||[]).forEach(function(r){ base[r.id] = r; });
+
+      /* A publisher running mostly deferred-attribution traffic shows $0 and a
+       * collapsed rev-per-call every morning, and its long calls sit unpaid
+       * until the buyer reports. None of that is a fault — an alert that cries
+       * wolf daily is worse than no alert. */
+      var cpaShare = {}, cpaNames = {};
+      ((ret.cpa && ret.cpa.byPublisher) || []).forEach(function(r){
+        cpaShare[r.id] = r.calls;
+        cpaNames[shortName(r.label)] = true;   // quality rows key on name, not id
+      });
+      function deferredPub(id, callsToday){
+        return Boolean(cpaShare[id] && callsToday && cpaShare[id]/callsToday >= 0.6);
+      }
+
+      (ret.publishers||[]).forEach(function(r){
+        var name = shortName(r.label), b = base[r.id];
+        var isDeferred = deferredPub(r.id, r.calls);
+        if(b && r.calls >= 20){
+          var avg = (b.calls||0)/7;
+          if(avg >= 1 && r.calls >= avg*3){
+            A.push({sev:"critical",tag:"Volume",rank:100+r.calls/avg,
+              t:name+" is running "+(r.calls/avg).toFixed(1)+"× its normal day",
+              d:"<b>"+NI(r.calls)+"</b> calls so far against a 7-day average of <b>"+NI(Math.round(avg))+"</b>/day."});
+          }
+        }
+        if(!isDeferred && b && r.calls >= 10 && (b.calls||0) >= 30){
+          var now = r.revenue/r.calls, was = (b.revenue||0)/(b.calls||1);
+          if(was > 1 && now <= was*0.5){
+            A.push({sev:"critical",tag:"Yield",rank:90+(1-now/was),
+              t:name+" is monetising at half its usual rate",
+              d:"<b>"+M2(now)+"</b> per call today vs <b>"+M2(was)+"</b> over 7 days, on "+NI(r.calls)+" calls."});
+          }
+        }
+        if(!isDeferred && r.calls >= 15 && r.revenue === 0){
+          A.push({sev:"warning",tag:"Zero",rank:70+r.calls/100,
+            t:name+" has sent "+NI(r.calls)+" calls and booked $0",
+            d:"Costing <b>"+M2(r.cost||0)+"</b> in telco with no revenue against it."});
+        }
+      });
+
+      var q = ret.quality;
+      if(q && q.rows){
+        q.rows.forEach(function(r){
+          // long + unpaid is the normal shape of a CPA call, not a broken transfer
+          if(cpaShare[r.id] || cpaNames[shortName(r.label)]) return;
+          if(r.longZero >= 3 && r.long >= 10){
+            var rate = r.longZero/r.long;
+            if(rate >= 0.10){
+              A.push({sev: rate>=0.15?"critical":"warning", tag:"Transfer", rank:80+rate,
+                t: shortName(r.label)+" breaks down after connecting",
+                d:"<b>"+PC(rate)+"</b> of its long calls earn $0 — "+NI(r.longZero)+" of "+NI(r.long)+" in 48 hours."});
+            }
+          }
+        });
+      }
+
+      var rt = ret.routing;
+      if(rt && rt.byCampaign){
+        rt.byCampaign.forEach(function(c){
+          if(c.calls < 10 || !c.noTarget) return;
+          var rate = c.noTarget/c.calls;
+          if(rate >= 0.3){
+            A.push({sev: rate>=0.6?"critical":"warning", tag:"Routing", rank:60+rate,
+              t: shortName(c.label)+" is dropping "+PC(rate)+" of its calls",
+              d:"<b>"+NI(c.noTarget)+"</b> of "+NI(c.calls)+" calls today reached no buyer."});
+          }
+        });
+      }
+    }
+
+    if(ret && ret.cpa && ret.cpa.book && ret.cpa.book.calls >= 20){
+      var cp = ret.cpa;
+      var estLine = (cp.estRevenue != null && cp.pendingLong)
+        ? " Historically that's worth about <b>"+M0(cp.estRevenue)+"</b>." : "";
+      A.push({sev:"info", tag:"Pending", rank:50,
+        t: NI(cp.book.calls)+" CPA calls awaiting attribution",
+        d:"<b>"+NI(cp.pendingLong)+"</b> ran past 45 minutes, the usual sign of a conversion."+estLine+
+          " <b>"+M0(cp.book.cost)+"</b> of carrier cost is already booked against them today."});
+    }
+
+    var rb = src("ringba");
+    if(rb && rb.buyers){
+      var un=0, tot=0;
+      rb.buyers.forEach(function(r){
+        tot += r.calls;
+        if(/^-?\s*no value\s*-?$/i.test(r.label) || r.label==="—") un += r.calls;
+      });
+      if(un >= 10 && tot > 0){
+        var sh = un/tot;
+        A.push({sev: sh>=0.3?"critical":"warning", tag:"Routing", rank:65+sh,
+          t:"Ringba is dropping "+PC(sh)+" of its calls",
+          d:"<b>"+NI(un)+"</b> of "+NI(tot)+" calls today reached no target."});
+      }
+    }
+
+    A.sort(function(a,b){ return b.rank-a.rank; });
+    return A.slice(0,12);
+  }
+
+  /* ---------- render ---------- */
+  function render(){
+    renderBanners();
+    renderOnAir();
+    renderHero();
+    renderKpis();
+    renderTable();
+    renderAlerts();
+    renderFeed();
+    renderChart();
+    var st = document.getElementById("stamp");
+    if(S.offlineAt){
+      st.innerHTML = "<b>Offline.</b> Showing the last numbers this phone downloaded, at "+
+        esc(new Date(S.offlineAt).toLocaleString())+".";
+    } else if(S.snap){
+      st.textContent = "Updated "+new Date(S.snap.generatedAt).toLocaleTimeString()+
+        " · refreshes every 60 seconds while open.";
+    } else { st.textContent = ""; }
+  }
+
+  function renderBanners(){
+    var el = document.getElementById("banners"), html = "";
+    if(S.error){
+      html += '<div class="banner" data-sev="critical"><div class="bc">'+
+        '<span class="bt">Can\'t reach the dashboard service</span>'+
+        '<span class="bd">The app loaded but its data service didn\'t answer.</span>'+
+        '<span class="code">'+esc(S.error)+'</span></div></div>';
+    }
+    // A TrackDrive company that failed while its siblings worked: the source
+    // reads ok, so say which company is missing rather than staying silent.
+    var td = sources().trackdrive;
+    if(td && td.ok && td.accounts){
+      td.accounts.filter(function(a){ return !a.ok; }).forEach(function(a){
+        html += '<div class="banner" data-sev="warning"><div class="bc">'+
+          '<span class="bt">TrackDrive · '+esc(a.label)+' didn\'t answer</span>'+
+          '<span class="bd">Its calls are missing from the TrackDrive totals. The other companies are unaffected.</span>'+
+          '<span class="code">'+esc(a.message||"no detail")+'</span></div></div>';
+      });
+    }
+
+    SERIES.forEach(function(s){
+      var d = sources()[s.k];
+      if(!d || d.ok) return;
+      if(d.reason === "not_configured"){
+        if(s.k === "trackdrive") return; // expected until its keys are added
+        html += '<div class="banner" data-sev="warning"><div class="bc">'+
+          '<span class="bt">'+esc(LABEL[s.k])+' isn\'t configured</span>'+
+          '<span class="bd">Its API keys haven\'t been set on the worker yet, so it contributes nothing to these totals.</span>'+
+          '<span class="code">wrangler secret put …</span></div></div>';
+      } else {
+        html += '<div class="banner" data-sev="critical"><div class="bc">'+
+          '<span class="bt">'+esc(LABEL[s.k])+' returned an error</span>'+
+          '<span class="bd">Its numbers are missing from every total on this page.</span>'+
+          '<span class="code">'+esc(d.message||d.reason||"unknown")+'</span></div></div>';
+      }
+    });
+    el.innerHTML = html;
+  }
+
+  function renderOnAir(){
+    var el=document.getElementById("onair"), n=liveNow();
+    var nEl=document.getElementById("onairN"), lEl=document.getElementById("onairL");
+    if(n==null){
+      el.setAttribute("data-state", S.loading ? "idle" : "down");
+      nEl.textContent = S.loading ? "…" : "—";
+      lEl.textContent = S.loading ? "checking" : "on air";
+      return;
+    }
+    el.setAttribute("data-state", n>0 ? "live" : "idle");
+    nEl.textContent = NI(n);
+    lEl.textContent = n===1 ? "call live" : "calls live";
+    el.title = "Calls connected right now. Ringba's report API has no in-progress metric, so it isn't counted.";
+  }
+
+  function renderHero(){
+    var t = combined();
+    document.getElementById("heroRev").textContent = t.any ? M0(t.revenue) : (S.loading ? "…" : "—");
+
+    var pv = yesterdayFigures(), d = document.getElementById("heroDelta"), yd = document.getElementById("heroYday");
+    if(pv && t.any){
+      var diff = pv.toNow>0 ? (t.revenue-pv.toNow)/pv.toNow : null;
+      var up = diff!=null && diff>=0;
+      d.className = "delta "+(diff==null?"":(up?"up":"down"));
+      d.innerHTML = '<span class="arrow">'+(diff==null?"·":(up?"▲":"▼"))+'</span><span>'+
+        (diff==null ? "yesterday had booked nothing by this hour"
+                    : (up?"+":"")+(diff*100).toFixed(0)+"% vs yesterday at this hour ("+M0(pv.toNow)+")")+'</span>';
+      yd.innerHTML = 'Yesterday closed at <b>'+M0(pv.full)+'</b>';
+    } else {
+      d.className="delta"; d.innerHTML='<span class="arrow">·</span><span>'+(S.loading?"loading…":"no comparison available")+'</span>';
+      yd.textContent="";
+    }
+
+    var bar=document.getElementById("splitBar"), rows=document.getElementById("splitRows");
+    var total = t.revenue||0;
+    bar.innerHTML = SERIES.map(function(s){
+      var d2=src(s.k); var v=d2?(d2.totals.revenue||0):0;
+      var w = total>0 ? Math.max(v>0?2:0, v/total*100) : 0;
+      return w>0 ? '<span style="width:'+w+'%;background:'+cssv(s.v)+'"></span>' : "";
+    }).join("") || '<span style="width:100%;background:var(--rule)"></span>';
+
+    rows.innerHTML = SERIES.map(function(s){
+      var d2=src(s.k), raw=sources()[s.k];
+      var recon = !isPrimary(s.k);
+      var v = d2 ? (recon ? '<span style="color:var(--ink-3)">not summed</span>' : M2(d2.totals.revenue||0)) : "—";
+      var c = d2 ? (NI(d2.totals.calls||0)+" calls"+(recon?" · already in Retreaver":"")+(d2.partial?" · newest 100 valued":""))
+                 : (raw && raw.reason==="not_configured" ? "not configured" : (S.loading?"loading":"unavailable"));
+      // TrackDrive can be several companies at once — name them, so the row
+      // isn't a total whose origin you have to guess.
+      var accts = d2 && d2.accounts;
+      var name = esc(s.label);
+      if(accts && accts.length){
+        name += ' <span style="color:var(--ink-3)">'+esc(accts.map(function(a){return a.label;}).join(" + "))+'</span>';
+      }
+      return '<div class="splitrow"><span class="sw" style="background:'+cssv(s.v)+'"></span>'+
+             name+' <span style="color:var(--ink-3)">'+esc(c)+'</span>'+
+             '<span class="v">'+v+'</span></div>';
+    }).join("");
+  }
+
+  function renderKpis(){
+    var t = combined();
+    var mtd = combined("mtd"), lm = combined("lastMonth");
+    var b = monthBounds();
+    var monthLabel = b.start.toLocaleDateString(undefined,{month:"long"});
+    var pMonthLabel = b.prev.toLocaleDateString(undefined,{month:"long"});
+    var closeLabel = new Date(b.end.getTime()-86400000).toLocaleDateString(undefined,{month:"short",day:"numeric"});
+    var proj = mtd.any ? mtd.revenue/monthFrac() : null;
+
+    var s2 = S.loading ? "loading…" : (pMonthLabel+" not available");
+    if(lm.any && lm.revenue>0){
+      s2 = esc(pMonthLabel)+" closed at <b>"+esc(M0(lm.revenue))+"</b>";
+      if(proj!=null){
+        var dm = (proj-lm.revenue)/lm.revenue;
+        s2 += ' <span class="'+(dm>=0?"pos":"neg2")+'">'+(dm>=0?"▲ +":"▼ ")+Math.abs(dm*100).toFixed(0)+"% projected</span>";
+      }
+    }
+
+    // Same-day trading book = everything minus the CPA campaigns, whose revenue
+    // the buyer reports a day late. Blending them makes margin meaningless.
+    var retS = src("retreaver");
+    var cpa = (retS && retS.cpa) || null;
+    var book = cpa ? cpa.book : null;
+    var tRevenue = t.revenue - (book ? book.revenue : 0);
+    var tPayout  = t.payout  - (book ? book.payout  : 0);
+    var tProfit  = t.profit  - (book ? book.profit  : 0);
+    var tCalls   = t.calls   - (book ? book.calls   : 0);
+    var tMargin  = tRevenue > 0 ? tProfit/tRevenue : null;
+
+    var minsIn = Math.max(1,(Date.now()-new Date(new Date().setHours(0,0,0,0)))/60000);
+    var perHour = tRevenue/(minsIn/60);
+    var ret = src("retreaver");
+    var q = ret && ret.quality;
+    var lzRate = (q && q.long>0) ? q.longZero/q.long : null;
+    var conv = t.calls>0 ? t.converted/t.calls : null;
+
+    var items = [
+      {n:monthLabel+" to date", v: mtd.any?M0(mtd.revenue):"—",
+       s: mtd.any?("on pace for "+M0(proj)+" by "+closeLabel):"loading", s2:s2, wide:true},
+      {n:"Calls today", v: t.any?NI(t.calls):"—", s: t.any?NI(t.converted)+" converted":"waiting"},
+      {n:"Gross profit", v: t.any?M0(tProfit):"—",
+       s: tMargin!=null ? PC(tMargin)+" margin"+(book && book.calls ? " · excl. CPA" : "") : "—"},
+      {n:"Revenue per call", v: tCalls>0?M2(tRevenue/tCalls):"—", s:"payout "+(t.any?M0(tPayout):"—")},
+      {n:"Conversion", v: PC(conv), s: t.any?NI(t.calls-t.converted)+" didn't convert":"—"},
+      {n:"Run rate", v: t.any?M0(perHour)+"/hr":"—",
+       s:(t.any?M0(perHour*24):"—")+" a day"+(book && book.calls ? " · excl. CPA" : "")},
+      {n:"Long & unpaid", v: lzRate!=null?PC(lzRate):"—", s: q?NI(q.longZero)+" calls, 48 hours":"—"}
+    ];
+
+    // The CPA pipeline: today's cost is real, today's revenue isn't in yet.
+    if (cpa && book && book.calls){
+      var estTxt = (cpa.estRevenue != null && cpa.pendingLong)
+        ? "~"+M0(cpa.estRevenue)+" est. tomorrow"
+        : (cpa.pendingLong ? NI(cpa.pendingLong)+" awaiting the buyer" : "none awaiting");
+      items.splice(2, 0, {
+        n:"CPA pending",
+        v: NI(cpa.pendingLong)+" long",
+        s: NI(book.calls)+" calls · "+M0(book.cost)+" cost booked",
+        s2: '<span style="color:var(--accent-ink)">'+esc(estTxt)+'</span>'
+      });
+    }
+
+    document.getElementById("kpis").innerHTML = items.map(function(i){
+      return '<div class="kpi'+(i.wide?" lead":"")+'"><div class="eyebrow">'+esc(i.n)+'</div>'+
+             '<div class="v">'+esc(i.v)+'</div><div class="n">'+esc(i.s)+'</div>'+
+             (i.s2?'<div class="n">'+i.s2+'</div>':'')+'</div>';
+    }).join("");
+  }
+
+  function renderTable(){
+    var body = document.getElementById("tableBody");
+    var rows = mergedRows(S.tab);
+    if(S.loading && !rows.length){
+      body.innerHTML = '<div style="padding:14px;display:flex;flex-direction:column;gap:10px">'+
+        [0,1,2,3,4].map(function(i){return '<div class="skel" style="width:'+(94-i*11)+'%"></div>';}).join("")+'</div>';
+      return;
+    }
+    if(!rows.length){
+      body.innerHTML = '<div class="state"><div class="h">Nothing yet today</div>'+
+        '<div>No '+esc(S.tab.replace(/s$/,""))+' has taken a call since midnight.</div></div>';
+      return;
+    }
+    var max = rows.reduce(function(a,r){ return Math.max(a, r.r.revenue||0); },0) || 1;
+    var head = S.tab==="campaigns"
+      ? ["Campaign","Calls","Conv","Conv %","Revenue","Profit"]
+      : [S.tab==="buyers"?"Buyer":"Publisher","Calls","Conv","Rev/call","Revenue","Profit"];
+    // On a phone, name / calls / conversions / revenue survive. Rev-per-call and
+    // profit drop before revenue is ever pushed off the right edge.
+    var optional = {3:true, 5:true};
+
+    var h = '<table><thead><tr>'+head.map(function(x,i){
+      return '<th'+(optional[i]?' class="opt"':'')+'>'+esc(x)+'</th>';
+    }).join("")+'</tr></thead><tbody>';
+    rows.slice(0,20).forEach(function(row){
+      var r=row.r;
+      // Retreaver reports converted_count, Ringba convertedCalls. A source that
+      // reports neither shows a dash rather than a false zero.
+      var conv = r.converted == null ? '<span style="color:var(--ink-3)">—</span>' : NI(r.converted);
+      var fourth = S.tab==="campaigns"
+        ? (r.converted == null ? "—" : PC(r.calls ? r.converted/r.calls : null))
+        : M2(r.calls ? r.revenue/r.calls : 0);
+      h += '<tr><td><span class="name"><span class="sw" style="background:'+cssv(SERIES.filter(function(s){return s.k===row.src;})[0].v)+'"></span>'+
+           '<span class="txt" title="'+esc(row.label)+'">'+esc(row.label)+'</span></span></td>'+
+           '<td>'+NI(r.calls)+'</td>'+
+           '<td>'+conv+'</td>'+
+           '<td class="sub opt">'+esc(fourth)+'</td>'+
+           '<td class="barcell money"><span class="fill" style="width:'+((r.revenue||0)/max*100)+'%;background:'+
+             cssv(SERIES.filter(function(s){return s.k===row.src;})[0].v)+'"></span>'+
+           '<span class="val">'+M2(r.revenue)+'</span></td>'+
+           '<td class="money opt'+((r.profit||0)<0?" neg":"")+'">'+M2(r.profit)+'</td></tr>';
+    });
+    body.innerHTML = h+'</tbody></table>';
+  }
+
+  function renderAlerts(){
+    var body=document.getElementById("alertBody"), meta=document.getElementById("alertMeta");
+    if(S.loading && !S.snap){ body.innerHTML='<div style="padding:14px"><div class="skel" style="width:80%"></div></div>'; meta.textContent=""; return; }
+    var A = buildAlerts();
+    if(!A.length){
+      body.innerHTML='<div class="state"><div class="h">Nothing needs you</div>'+
+        '<div>No volume spike, yield collapse, transfer-failure pattern or dead route in the windows watched.</div></div>';
+      meta.textContent="all clear"; return;
+    }
+    body.innerHTML = A.map(function(a){
+      return '<div class="alert" data-sev="'+a.sev+'"><div class="stripe"></div><div class="c">'+
+             '<div class="t"><span class="tag">'+esc(a.tag)+'</span>'+esc(a.t)+'</div>'+
+             '<div class="d">'+a.d+'</div></div></div>';
+    }).join("");
+    var crit=A.filter(function(a){return a.sev==="critical";}).length;
+    meta.textContent = crit ? crit+" critical · "+A.length : A.length+" open";
+  }
+
+  function renderFeed(){
+    var body=document.getElementById("feedBody"), meta=document.getElementById("feedMeta");
+    var ret=src("retreaver"), calls=(ret&&ret.feed)||[];
+    if(S.loading && !calls.length){ body.innerHTML='<div style="padding:14px"><div class="skel" style="width:70%"></div></div>'; return; }
+    if(!calls.length){
+      body.innerHTML='<div class="state"><div class="h">No calls yet today</div><div>The feed fills as calls arrive.</div></div>';
+      meta.textContent=""; return;
+    }
+    var h='<table><thead><tr><th>Time</th><th>Publisher</th><th>Buyer</th>'+
+          '<th class="opt">Dur</th><th>Revenue</th></tr></thead><tbody>';
+    calls.forEach(function(c){
+      var rev=c.revenue||0, long=(c.duration||0)>=300, d=new Date(c.at);
+      var dead = ["no-target","failed","blocked","not-open"].indexOf(c.status)>=0;
+      var kind = dead?"crit":(long&&rev===0)?"warn":rev>0?"good":"idle";
+      var label = dead?(c.status==="no-target"?"no buyer":c.status)
+                : kind==="warn"?"long, $0" : kind==="good"?"paid" : (c.friendly||c.status||"—");
+      h += '<tr><td>'+esc(isNaN(d)?"—":d.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"}))+'</td>'+
+           '<td><span class="txt">'+esc(shortName(c.publisher))+'</span>'+
+             '<div class="sub"><span class="txt">'+esc(shortName(c.campaign))+'</span></div></td>'+
+           '<td><span class="pill" data-k="'+kind+'"><span class="d"></span>'+esc(label)+'</span>'+
+             '<div class="sub" style="margin-top:3px"><span class="txt">'+esc(shortName(c.buyer))+'</span></div></td>'+
+           '<td class="sub opt">'+esc(DUR(c.duration))+'</td>'+
+           '<td class="money">'+(rev?M2(rev):'<span style="color:var(--ink-3)">—</span>')+'</td></tr>';
+    });
+    body.innerHTML = h+'</tbody></table>';
+    meta.textContent = "Retreaver · "+calls.length+" newest";
+  }
+
+  /* ---------- chart ---------- */
+  document.getElementById("legend").innerHTML = SERIES.map(function(s){
+    return '<span><i style="background:var('+s.v+')"></i>'+s.label+'</span>';
+  }).join("");
+
+  function renderChart(){
+    var svg=document.getElementById("chart"), wrap=svg.parentNode;
+    var W=Math.max(300, wrap.clientWidth||360), H=170, padL=40, padR=6, padT=10, padB=20;
+    var data=combinedHourly();
+    var max=data.reduce(function(a,d){ return Math.max(a, d.retreaver+d.ringba+d.trackdrive); },0);
+    var nice = max<=0 ? 100 : Math.pow(10, Math.floor(Math.log10(max)));
+    nice = Math.ceil(max/(nice/2))*(nice/2);
+    if(!isFinite(nice)||nice<=0) nice=100;
+
+    var iw=W-padL-padR, ih=H-padT-padB, bw=Math.max(3, iw/24-3);
+    var y=function(v){ return padT+ih-(v/nice)*ih; };
+    var x=function(h){ return padL+(h+0.5)*(iw/24)-bw/2; };
+    var g="";
+
+    for(var i=0;i<=2;i++){
+      var gv=nice*i/2, gy=y(gv);
+      g+='<line x1="'+padL+'" x2="'+(W-padR)+'" y1="'+gy.toFixed(1)+'" y2="'+gy.toFixed(1)+'" stroke="var(--rule)" stroke-width="1"/>'+
+         '<text x="'+(padL-6)+'" y="'+(gy+3.5).toFixed(1)+'" text-anchor="end" fill="var(--ink-3)" font-family="IBM Plex Mono, monospace" font-size="9">'+
+         (gv>=1000?(Math.round(gv/100)/10)+"k":Math.round(gv))+'</text>';
+    }
+    data.forEach(function(d){
+      var acc=0, segs=[];
+      SERIES.forEach(function(s){ var v=d[s.k]; if(v>0) segs.push({s:s, from:acc, to:acc+v}); acc+=v; });
+      segs.forEach(function(sg, idx){
+        var yTop=y(sg.to), yBot=y(sg.from), gap=idx>0?2:0;
+        var hgt=Math.max(1.5,(yBot-yTop)-gap), xx=x(d.h), isTop=idx===segs.length-1;
+        if(isTop && hgt>4){
+          var r=Math.min(3,bw/2);
+          g+='<path d="M'+xx.toFixed(1)+' '+(yTop+hgt).toFixed(1)+' V'+(yTop+r).toFixed(1)+
+             ' Q'+xx.toFixed(1)+' '+yTop.toFixed(1)+' '+(xx+r).toFixed(1)+' '+yTop.toFixed(1)+
+             ' H'+(xx+bw-r).toFixed(1)+' Q'+(xx+bw).toFixed(1)+' '+yTop.toFixed(1)+' '+(xx+bw).toFixed(1)+' '+(yTop+r).toFixed(1)+
+             ' V'+(yTop+hgt).toFixed(1)+' Z" fill="var('+sg.s.v+')"/>';
+        } else {
+          g+='<rect x="'+xx.toFixed(1)+'" y="'+yTop.toFixed(1)+'" width="'+bw.toFixed(1)+
+             '" height="'+hgt.toFixed(1)+'" fill="var('+sg.s.v+')"/>';
+        }
+      });
+      if(!segs.length){
+        g+='<rect x="'+x(d.h).toFixed(1)+'" y="'+(padT+ih-1.5)+'" width="'+bw.toFixed(1)+'" height="1.5" fill="var(--rule)"/>';
+      }
+    });
+    g+='<line x1="'+padL+'" x2="'+(W-padR)+'" y1="'+(padT+ih)+'" y2="'+(padT+ih)+'" stroke="var(--rule-2)" stroke-width="1"/>';
+    var step = W<420 ? 6 : 3;
+    for(var hh=0;hh<24;hh+=step){
+      g+='<text x="'+(x(hh)+bw/2).toFixed(1)+'" y="'+(H-5)+'" text-anchor="middle" fill="var(--ink-3)" font-family="IBM Plex Mono, monospace" font-size="9">'+
+         (hh===0?"12a":hh<12?hh+"a":hh===12?"12p":(hh-12)+"p")+'</text>';
+    }
+    var nowH=new Date().getHours();
+    g+='<line x1="'+(x(nowH)+bw/2).toFixed(1)+'" x2="'+(x(nowH)+bw/2).toFixed(1)+'" y1="'+padT+'" y2="'+(padT+ih)+
+       '" stroke="var(--accent)" stroke-width="1" stroke-dasharray="2 3" opacity=".5"/>';
+
+    svg.setAttribute("viewBox","0 0 "+W+" "+H);
+    svg.setAttribute("height",H);
+    svg.innerHTML=g;
+  }
+
+  /* ---------- loading ---------- */
+  function load(){
+    var btn=document.getElementById("refresh");
+    btn.setAttribute("aria-busy","true");
+    return fetch("/api/snapshot?"+windowParams().toString(), {headers:{accept:"application/json"}})
+      .then(function(res){
+        S.offlineAt = res.headers.get("x-cc-cached-at");
+        if(!res.ok && !S.offlineAt) throw new Error("Service returned "+res.status);
+        return res.json();
+      })
+      .then(function(body){
+        if(body && body.offline){ S.error = null; }
+        else { S.snap = body; S.error = null; }
+        S.loading = false;
+      })
+      .catch(function(err){ S.error = err.message || String(err); S.loading = false; })
+      .then(function(){ btn.removeAttribute("aria-busy"); stampDay(); render(); });
+  }
+
+  document.getElementById("refresh").addEventListener("click", load);
+  document.querySelectorAll('.tabs button').forEach(function(b){
+    b.addEventListener("click", function(){
+      S.tab = b.getAttribute("data-tab");
+      document.querySelectorAll('.tabs button').forEach(function(o){
+        o.setAttribute("aria-selected", String(o===b));
+      });
+      renderTable();
+    });
+  });
+
+  var timer = null;
+  function startTimer(){ stopTimer(); timer = setInterval(load, 60000); }
+  function stopTimer(){ if(timer){ clearInterval(timer); timer=null; } }
+  document.addEventListener("visibilitychange", function(){
+    if(document.hidden){ stopTimer(); } else { load(); startTimer(); }
+  });
+  window.addEventListener("resize", function(){ renderChart(); });
+
+  /* ---------- install prompt ---------- */
+  var deferred = null;
+  window.addEventListener("beforeinstallprompt", function(e){
+    e.preventDefault(); deferred = e;
+    document.getElementById("install").classList.add("on");
+  });
+  document.getElementById("installBtn").addEventListener("click", function(){
+    if(!deferred) return;
+    deferred.prompt();
+    deferred.userChoice.finally(function(){
+      deferred = null;
+      document.getElementById("install").classList.remove("on");
+    });
+  });
+
+  if("serviceWorker" in navigator){
+    window.addEventListener("load", function(){
+      navigator.serviceWorker.register("/sw.js").catch(function(){});
+    });
+  }
+
+  render();
+  load();
+  startTimer();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,92 @@
+/* Command Center service worker.
+ *
+ * Two jobs only:
+ *   1. keep the app shell installable and instant on a cold phone start
+ *   2. hold the last successful snapshot so opening the app underground still
+ *      shows numbers, clearly marked as the time they were taken
+ *
+ * It never caches a failed response, and never serves a stale snapshot without
+ * the app knowing — the app reads the `x-cc-cached-at` header and says so.
+ */
+
+const SHELL = 'cc-shell-v1';
+const DATA = 'cc-data-v1';
+
+const SHELL_URLS = ['/', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(SHELL).then((c) => c.addAll(SHELL_URLS)).then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(keys.filter((k) => k !== SHELL && k !== DATA).map((k) => caches.delete(k)))
+      )
+      .then(() => self.clients.claim())
+  );
+});
+
+self.addEventListener('fetch', (event) => {
+  const { request } = event;
+  if (request.method !== 'GET') return;
+
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+
+  // API: network first, fall back to the last good copy, tagged with its age.
+  if (url.pathname.startsWith('/api/')) {
+    event.respondWith(
+      fetch(request)
+        .then((res) => {
+          if (res.ok && url.pathname === '/api/snapshot') {
+            const copy = res.clone();
+            caches.open(DATA).then((c) => {
+              const stamped = new Response(copy.body, {
+                status: copy.status,
+                headers: new Headers([
+                  ...copy.headers,
+                  ['x-cc-cached-at', new Date().toISOString()],
+                ]),
+              });
+              c.put('/api/snapshot', stamped);
+            });
+          }
+          return res;
+        })
+        .catch(() =>
+          caches.open(DATA).then((c) =>
+            c.match('/api/snapshot').then(
+              (hit) =>
+                hit ||
+                new Response(JSON.stringify({ ok: false, offline: true }), {
+                  status: 503,
+                  headers: { 'content-type': 'application/json' },
+                })
+            )
+          )
+        )
+    );
+    return;
+  }
+
+  // Shell: cache first, refresh in the background.
+  event.respondWith(
+    caches.match(request).then((hit) => {
+      const network = fetch(request)
+        .then((res) => {
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(SHELL).then((c) => c.put(request, copy));
+          }
+          return res;
+        })
+        .catch(() => hit);
+      return hit || network;
+    })
+  );
+});

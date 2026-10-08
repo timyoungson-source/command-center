@@ -1,0 +1,19 @@
+{
+  "name": "command-center",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hosted, installable call-revenue dashboard for Instar — Retreaver, Ringba and TrackDrive in one view.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "workerd@1.20260826.1": true,
+    "fsevents@2.3.3": true
+  }
+}

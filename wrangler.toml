@@ -1,0 +1,81 @@
+name = "command-center"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+
+# app.html and service-worker.txt are bundled as text and served by the Worker,
+# so the whole app is one deployable with no separate asset hosting.
+[[rules]]
+type = "Text"
+globs = ["**/*.html", "**/*.txt"]
+fallthrough = true
+
+[observability]
+enabled = true
+
+# Settings that are identifiers, not credentials. Keeping them here means three
+# `wrangler secret put` prompts at deploy time instead of nine, and they are
+# visible in version control where they can be reviewed and corrected.
+# The three real secrets stay out of this file — see the list below.
+[vars]
+RETREAVER_COMPANY_ID = "285270"
+RINGBA_ACCOUNT_ID    = "RAa7e916b80535402fbfb71f816dc6f85f"
+
+TRACKDRIVE_1_LABEL = "XY7"
+TRACKDRIVE_1_HOST  = "elite-calls-com.trackdrive.com"
+TRACKDRIVE_1_ROLE  = "primary"
+TRACKDRIVE_1_DIDS  = "12092556402=Evolve tech,12092556407=Leaders IT,12097064001=Webster"
+
+# What WE pay the publisher per converted call. This figure exists in no
+# platform: XY7's TrackDrive is their book, and it has no idea what we pay
+# Evolve, Leaders IT or Webster. Revenue comes from their
+# traffic_source_payout (what they owe us); this is the other side.
+# One rate across all three publishers as of Oct 2026.
+TRACKDRIVE_1_PAYOUT_PER_CONVERSION = "180"
+
+# ---------------------------------------------------------------------------
+# Secrets — set with `wrangler secret put NAME`, never in this file.
+# Exactly three. Everything else lives in [vars] above.
+#
+#   RETREAVER_API_KEY      Retreaver → Settings → My Account → API Access
+#   RINGBA_TOKEN           Ringba → Security → API Access Tokens
+#   TRACKDRIVE_1_TOKEN     XY7's Elite-Calls TrackDrive API key
+#                          (or TRACKDRIVE_1_PUBLIC_KEY + _PRIVATE_KEY if they
+#                           issued a pair instead of a single string)
+#
+# TrackDrive — scoped by company, and every company is its own subdomain, so
+# each account needs its own host and credential. Up to three numbered slots;
+# a slot switches on once it has a HOST plus either a TOKEN or a key pair.
+#
+#   TRACKDRIVE_1_LABEL        XY7
+#   TRACKDRIVE_1_HOST         elite-calls-com.trackdrive.com   (no scheme)
+#   TRACKDRIVE_1_TOKEN        — or —
+#   TRACKDRIVE_1_PUBLIC_KEY + TRACKDRIVE_1_PRIVATE_KEY
+#
+#   TRACKDRIVE_1_ROLE         primary
+#     SSDI has run publisher -> XY7 direct since 16 Sep 2026 and never touches
+#     Retreaver, so this revenue reaches no other platform and has to count.
+#     Default is `reconciliation` (fetched and shown, never added), which is
+#     right for any TrackDrive company that is a Retreaver buyer. Do not mix
+#     roles in one deployment: the page treats TrackDrive as a single source.
+#
+#   TRACKDRIVE_1_DIDS         12092556402=Evolve tech,12092556407=Leaders IT,12097064001=Webster
+#     Going direct means the publisher split comes from the number dialled,
+#     not from traffic_source (which, seen from the buyer's side, is us).
+#     One DID per publisher, so the number is the attribution. Matched on the
+#     last ten digits, so +1 / 1 / bare all resolve the same.
+#
+#   TRACKDRIVE_2_LABEL        Instar
+#   TRACKDRIVE_2_HOST         instar.trackdrive.com
+#   TRACKDRIVE_2_...
+#
+# Known company hosts on this login:
+#   Instar           76279  instar.trackdrive.com
+#   Elite-Calls.com  31797  elite-calls-com.trackdrive.com   (XY7)
+#
+# Optional lock screen, for while the worker is on a *.workers.dev URL that
+# Cloudflare Access cannot cover:
+#   ACCESS_PASSPHRASE
+#
+# COMPANY_ID and ACCOUNT_ID are not secret, but keeping every upstream setting
+# in one place beats splitting them across [vars] and secrets.
+# ---------------------------------------------------------------------------

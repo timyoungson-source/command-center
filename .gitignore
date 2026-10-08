@@ -1,0 +1,7 @@
+node_modules/
+dist/
+build/
+.wrangler/
+.dev.vars
+*.log
+test/*.png
