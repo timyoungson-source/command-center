@@ -1285,9 +1285,10 @@ function readWindow(url) {
 /** Redact every configured secret. No truncation — see scrub() for that. */
 function scrubKeys(text, env) {
   let out = String(text ?? 'Unknown error');
-  const secrets = [env.RETREAVER_API_KEY, env.RINGBA_TOKEN, env.ACCESS_PASSPHRASE];
+  const secrets = [env.RETREAVER_API_KEY, env.RINGBA_TOKEN, env.ACCESS_PASSPHRASE, env.MCP_BEARER_TOKEN];
   for (const slot of ['', '1_', '2_', '3_']) {
-    secrets.push(env[`TRACKDRIVE_${slot}TOKEN`], env[`TRACKDRIVE_${slot}PUBLIC_KEY`], env[`TRACKDRIVE_${slot}PRIVATE_KEY`]);
+    secrets.push(env[`TRACKDRIVE_${slot}TOKEN`], env[`TRACKDRIVE_${slot}PUBLIC_KEY`],
+                 env[`TRACKDRIVE_${slot}PRIVATE_KEY`], env[`TRACKDRIVE_${slot}BASIC`]);
   }
   for (const secret of secrets) {
     if (secret) out = out.split(secret).join('«redacted»');
@@ -1582,6 +1583,284 @@ async function apiDiag(url, env) {
   return json(JSON.parse(scrubKeys(JSON.stringify(out), env)));
 }
 
+/* ------------------------------------------------------------------ *
+ * MCP server (Streamable HTTP), READ-ONLY
+ *
+ * Lets an MCP client read the configured TrackDrive accounts without the
+ * credential ever leaving Cloudflare. The client gets numbers; the Basic
+ * blob stays here.
+ *
+ * Every tool below is a read. There is deliberately NO tool that writes
+ * to TrackDrive, Retreaver, Ringba or this worker, because the consumer
+ * of this endpoint is ledger and accounting work.
+ *
+ * Auth is MCP_BEARER_TOKEN, compared in constant time. It is separate
+ * from ACCESS_PASSPHRASE because a connector cannot perform the cookie
+ * login, so /mcp is routed before that gate. If MCP_BEARER_TOKEN is
+ * unset the endpoint 404s: an unconfigured deploy must not leave an
+ * open door onto the call data.
+ * ------------------------------------------------------------------ */
+
+// Newest first. We echo back whichever the client asks for if we know it,
+// so one deployment serves old and new clients.
+const MCP_PROTOCOL_VERSIONS = [
+  '2026-07-28', '2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05',
+];
+const MCP_SERVER_INFO = { name: 'command-center-trackdrive', version: VERSION };
+const MCP_CAPABILITIES = { tools: { listChanged: false } };
+
+const MCP_TOOLS = [
+  {
+    name: 'trackdrive_accounts',
+    title: 'TrackDrive accounts',
+    description:
+      'List the configured TrackDrive accounts: label, host, role, auth style, the DID-to-publisher map and the payout rates. Call this FIRST to confirm which company the credential actually reaches — XY7/Elite-Calls is elite-calls-com.trackdrive.com, Instar is instar.trackdrive.com and is a different book. Returns no credentials.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'trackdrive_rollup',
+    title: 'TrackDrive rollup',
+    description:
+      'Roll a window up into OUR economics, with a per-publisher breakdown attributed by the DID dialled. Revenue is their traffic_source_payout (what they owe us); their own revenue/buyer_revenue is their margin and is never counted. Payout is computed per publisher and accrues only against calls they have actually paid for — ones flagged but not yet priced are reported as pendingConversions. This is the reconciliation tool.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        start: { type: 'string', description: 'ISO 8601 window start, e.g. 2026-09-16T04:00:00Z' },
+        end: { type: 'string', description: 'ISO 8601 window end, e.g. 2026-10-08T04:00:00Z' },
+        account: { type: 'string', description: 'Account label such as "XY7". Defaults to the primary account.' },
+      },
+      required: ['start', 'end'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'trackdrive_calls',
+    title: 'TrackDrive calls',
+    description:
+      'Individual call records for a window, trimmed to the fields that matter and with the publisher resolved from the DID. Use for spot-checks and for seeing which numbers calls are actually arriving on; use trackdrive_rollup for any total.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        start: { type: 'string', description: 'ISO 8601 window start' },
+        end: { type: 'string', description: 'ISO 8601 window end' },
+        account: { type: 'string', description: 'Account label. Defaults to the primary account.' },
+        limit: { type: 'integer', description: 'Records to return, 1 to 200. Default 50.' },
+      },
+      required: ['start', 'end'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'trackdrive_report',
+    title: 'TrackDrive server-side report',
+    description:
+      "TrackDrive's own grouped report, as an independent cross-check against trackdrive_rollup. Needs report permission on the account: Instar's user does not have it and returns null, XY7's does.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        category: { type: 'string', description: 'Grouping: traffic_source, buyer, offer or campaign. Default traffic_source.' },
+        start: { type: 'string', description: 'ISO 8601 window start' },
+        end: { type: 'string', description: 'ISO 8601 window end' },
+        account: { type: 'string', description: 'Account label. Defaults to the primary account.' },
+      },
+      required: ['start', 'end'],
+      additionalProperties: false,
+    },
+  },
+];
+
+const rpcOk = (id, result) => ({ jsonrpc: '2.0', id, result });
+const rpcError = (id, code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
+
+function requireIso(value, field) {
+  const s = String(value ?? '').trim();
+  if (!s || isNaN(new Date(s).getTime())) {
+    throw new HttpError(400, `${field} must be an ISO 8601 timestamp`);
+  }
+  return s;
+}
+
+/** Named account, else the primary one, else the first configured. */
+function pickMcpAccount(accounts, label) {
+  if (label) {
+    const want = String(label).trim().toLowerCase();
+    const hit = accounts.find((a) => a.label.toLowerCase() === want || a.host.toLowerCase() === want);
+    if (!hit) throw new HttpError(404, `No TrackDrive account labelled "${label}"`);
+    return hit;
+  }
+  return accounts.find((a) => a.role === 'primary') ?? accounts[0];
+}
+
+async function mcpCallTool(name, args, env) {
+  const accounts = trackdriveAccounts(env);
+  if (!accounts.length) throw new HttpError(503, 'No TrackDrive account is configured');
+
+  if (name === 'trackdrive_accounts') {
+    return accounts.map((a) => ({
+      label: a.label,
+      host: a.host,
+      role: a.role,
+      authStyle: tdAuth(a).style,
+      dids: Object.fromEntries(a.dids),
+      payoutPerConversion: a.payoutPerConversion,
+      payoutRatesByPublisher: Object.fromEntries(a.payoutRates ?? []),
+    }));
+  }
+
+  const acct = pickMcpAccount(accounts, args.account);
+  const start = requireIso(args.start, 'start');
+  const end = requireIso(args.end, 'end');
+
+  if (name === 'trackdrive_rollup') {
+    const body = await tdCallsFor(acct, start, end);
+    const r = tdRollup(body, acct.dids, acct.payoutPerConversion, 0, acct.payoutRates);
+    return {
+      account: acct.label, host: acct.host, role: acct.role,
+      window: { start, end },
+      totals: r.totals,
+      publishers: r.publishers,
+      partial: r.partial,
+      note: r.partial
+        ? 'More calls exist than were fetched in one page. Narrow the window before trusting totals.'
+        : null,
+    };
+  }
+
+  if (name === 'trackdrive_calls') {
+    const body = await tdCallsFor(acct, start, end);
+    const limit = Math.min(Math.max(parseInt(args.limit ?? 50, 10) || 50, 1), 200);
+    const calls = (body?.calls ?? []).slice(0, limit).map((c) => ({
+      created_at: c.created_at,
+      number_called: c.number_called,
+      publisher: didLabel(acct.dids, c.number_called) || c.traffic_source || 'Unattributed',
+      offer: c.offer ?? c.user_offer_id ?? null,
+      traffic_source: c.traffic_source ?? null,
+      our_revenue: num(c.traffic_source_payout ?? c.payout),
+      their_margin_not_ours: c.revenue ?? c.buyer_revenue ?? null,
+      converted_flag: c.traffic_source_converted ?? c.buyer_converted ?? null,
+      total_duration: num(c.total_duration),
+      status: c.status ?? null,
+    }));
+    return {
+      account: acct.label, host: acct.host,
+      window: { start, end },
+      returned: calls.length,
+      totalCount: body?.metadata?.total_count ?? null,
+      calls,
+    };
+  }
+
+  if (name === 'trackdrive_report') {
+    const category = String(args.category || 'traffic_source');
+    const rows = await tdReport(acct, category, start, end);
+    return {
+      account: acct.label, host: acct.host, category, window: { start, end },
+      rows: rows ?? null,
+      note: rows ? null : 'No report returned — either no permission on this account, or no rows in the window.',
+    };
+  }
+
+  throw new HttpError(400, `Unknown tool: ${name}`);
+}
+
+async function mcpDispatch(msg, env) {
+  const id = msg?.id ?? null;
+  const method = msg?.method;
+  const params = msg?.params ?? {};
+  const isNotification = msg?.id === undefined || msg?.id === null;
+
+  if (typeof method !== 'string') {
+    return isNotification ? null : rpcError(id, -32600, 'Invalid Request');
+  }
+  // Fire-and-forget: acknowledged by the 202, never answered.
+  if (method.startsWith('notifications/')) return null;
+
+  try {
+    switch (method) {
+      case 'initialize': {
+        const asked = params?.protocolVersion;
+        return rpcOk(id, {
+          protocolVersion: MCP_PROTOCOL_VERSIONS.includes(asked) ? asked : MCP_PROTOCOL_VERSIONS[0],
+          capabilities: MCP_CAPABILITIES,
+          serverInfo: MCP_SERVER_INFO,
+        });
+      }
+      case 'server/discover':
+        return rpcOk(id, {
+          resultType: 'complete',
+          supportedVersions: MCP_PROTOCOL_VERSIONS,
+          capabilities: MCP_CAPABILITIES,
+          _meta: { 'io.modelcontextprotocol/serverInfo': MCP_SERVER_INFO },
+        });
+      case 'ping':
+        return rpcOk(id, {});
+      case 'tools/list':
+        return rpcOk(id, { resultType: 'complete', tools: MCP_TOOLS });
+      case 'tools/call': {
+        const data = await mcpCallTool(params?.name, params?.arguments ?? {}, env);
+        return rpcOk(id, {
+          resultType: 'complete',
+          content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
+        });
+      }
+      // Declared unsupported, but answered rather than errored so a client
+      // that probes them during handshake does not treat us as broken.
+      case 'resources/list':
+        return rpcOk(id, { resultType: 'complete', resources: [] });
+      case 'prompts/list':
+        return rpcOk(id, { resultType: 'complete', prompts: [] });
+      default:
+        return isNotification ? null : rpcError(id, -32601, `Method not found: ${method}`);
+    }
+  } catch (err) {
+    const message = scrub(err?.message ?? String(err), env);
+    // A failing tool is a tool result, not a protocol error — the client
+    // should see why rather than just losing the connection.
+    if (method === 'tools/call') {
+      return rpcOk(id, {
+        resultType: 'complete',
+        isError: true,
+        content: [{ type: 'text', text: message }],
+      });
+    }
+    return isNotification ? null : rpcError(id, -32603, message);
+  }
+}
+
+async function handleMcp(request, env) {
+  // No token configured means no endpoint. Never fail open.
+  if (!env.MCP_BEARER_TOKEN) return new Response('Not found', { status: 404 });
+
+  if (request.method !== 'POST') {
+    // We answer request/response only; there is no long-lived SSE stream to GET.
+    return new Response('Method Not Allowed', { status: 405, headers: { allow: 'POST' } });
+  }
+
+  const given = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
+  if (!safeEqual(given, env.MCP_BEARER_TOKEN)) {
+    return json({ error: 'unauthorized' }, 401, { 'www-authenticate': 'Bearer' });
+  }
+
+  let payload;
+  try {
+    payload = await request.json();
+  } catch (_) {
+    return json(rpcError(null, -32700, 'Parse error'), 400);
+  }
+
+  const batch = Array.isArray(payload);
+  const messages = batch ? payload : [payload];
+  const replies = [];
+  for (const m of messages) {
+    const reply = await mcpDispatch(m, env);
+    if (reply) replies.push(reply);
+  }
+
+  // Every message was a notification: nothing to answer.
+  if (!replies.length) return new Response(null, { status: 202 });
+  return json(batch ? replies : replies[0]);
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -1592,6 +1871,10 @@ export default {
     cached.enabled = String(env.EDGE_CACHE || '').toLowerCase() === 'on';
 
     try {
+      // An MCP connector cannot perform the cookie login, so /mcp is routed
+      // ahead of the passphrase gate and carries its own bearer token.
+      if (path === '/mcp') return await handleMcp(request, env);
+
       // Gate everything except the manifest and icons, which the OS fetches
       // without cookies when installing to a home screen.
       if (env.ACCESS_PASSPHRASE) {

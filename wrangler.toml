@@ -53,6 +53,20 @@ TRACKDRIVE_1_PAYOUT_PER_CONVERSION = "180"
 #   TRACKDRIVE_1_TOKEN     XY7's Elite-Calls TrackDrive API key
 #                          (or TRACKDRIVE_1_PUBLIC_KEY + _PRIVATE_KEY if they
 #                           issued a pair instead of a single string)
+#   MCP_BEARER_TOKEN       Bearer token for the read-only /mcp endpoint
+#
+# MCP_BEARER_TOKEN turns on /mcp, a READ-ONLY MCP server over the TrackDrive
+# accounts, so an MCP client can read XY7's book without the TrackDrive
+# credential ever leaving Cloudflare. It is deliberately separate from
+# ACCESS_PASSPHRASE: a connector cannot do the cookie login, so /mcp is routed
+# ahead of that gate and authenticates itself. Leave MCP_BEARER_TOKEN unset and
+# /mcp returns 404 — it never fails open. Generate one with:
+#
+#   openssl rand -hex 32 | tr -d '\n' | pbcopy
+#   npx wrangler secret put MCP_BEARER_TOKEN
+#
+# Then add the connector in Claude with URL https://<worker>/mcp and request
+# header  Authorization: Bearer <that token>.
 #
 # TrackDrive — scoped by company, and every company is its own subdomain, so
 # each account needs its own host and credential. Up to three numbered slots;
