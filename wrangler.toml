@@ -29,7 +29,19 @@ TRACKDRIVE_1_DIDS  = "12092556402=Evolve tech,12092556407=Leaders IT,12097064001
 # platform: XY7's TrackDrive is their book, and it has no idea what we pay
 # Evolve, Leaders IT or Webster. Revenue comes from their
 # traffic_source_payout (what they owe us); this is the other side.
-# One rate across all three publishers as of Oct 2026.
+#
+# The rate is NOT uniform. Confirmed with Tim 8 Oct 2026, and matching
+# Retreaver's own history for the period up to 15 Sep when SSDI still routed
+# through Retreaver:
+#
+#   Evolve tech   180
+#   Leaders IT    170
+#   Webster       180
+#
+# Keys are matched case-insensitively against the publisher label the DID map
+# resolves to, so they must stay spelled as in TRACKDRIVE_1_DIDS. Any
+# publisher not listed falls back to the flat figure below.
+TRACKDRIVE_1_PAYOUT_PER_CONVERSION_BY_PUBLISHER = "Evolve tech=180,Leaders IT=170,Webster=180"
 TRACKDRIVE_1_PAYOUT_PER_CONVERSION = "180"
 
 # ---------------------------------------------------------------------------

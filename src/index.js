@@ -882,6 +882,42 @@ function parseDids(spec) {
   return map;
 }
 
+/**
+ * Per-publisher payout rates: "Evolve tech=180,Leaders IT=170,Webster=180".
+ *
+ * The rate is NOT uniform. Confirmed with Tim 8 Oct 2026: Evolve tech and
+ * Webster are $180 per converted call, Leaders IT is $170. Retreaver's own
+ * history agrees — through Sep 15, when SSDI still routed through Retreaver,
+ * Leaders IT was paid $170 on every conversion while the other two were paid
+ * $180. A single flat rate overstated what we pay Leaders IT by $10 a
+ * conversion and understated margin by the same.
+ *
+ * Keys are matched case-insensitively against the publisher label the DID map
+ * resolves to. Anything not listed falls back to
+ * TRACKDRIVE_n_PAYOUT_PER_CONVERSION.
+ */
+function parsePayoutRates(spec) {
+  const map = new Map();
+  if (!spec) return map;
+  for (const pair of String(spec).split(',')) {
+    const i = pair.indexOf('=');
+    if (i < 0) continue;
+    const label = pair.slice(0, i).trim().toLowerCase();
+    const rate = Number(pair.slice(i + 1).trim());
+    if (label && Number.isFinite(rate)) map.set(label, rate);
+  }
+  return map;
+}
+
+/** Rate for one publisher label, falling back to the account-wide figure. */
+function payoutRateFor(acctRates, fallback, label) {
+  if (acctRates && acctRates.size) {
+    const hit = acctRates.get(String(label || '').trim().toLowerCase());
+    if (hit !== undefined) return hit;
+  }
+  return fallback;
+}
+
 /** Match on the last ten digits so +1 / 1 / bare all resolve the same. */
 function didLabel(map, numberCalled) {
   if (!map || !map.size) return null;
@@ -904,11 +940,12 @@ function trackdriveAccounts(env) {
     // Tolerate the whole header being pasted in — "Basic xxxx" or just "xxxx".
     const basic = String(env[`TRACKDRIVE_${slot}BASIC`] || '').trim().replace(/^Basic\s+/i, '');
     const payoutPerConversion = Number(env[`TRACKDRIVE_${slot}PAYOUT_PER_CONVERSION`]) || 0;
+    const payoutRates = parsePayoutRates(env[`TRACKDRIVE_${slot}PAYOUT_PER_CONVERSION_BY_PUBLISHER`]);
     if (!basic && !token && !(pub && priv)) continue;
     if (out.some((a) => a.host === host)) continue; // un-numbered duplicating slot 1
     out.push({
       label: env[`TRACKDRIVE_${slot}LABEL`] || host.split('.')[0],
-      host, token, pub, priv, basic, payoutPerConversion,
+      host, token, pub, priv, basic, payoutPerConversion, payoutRates,
       role: String(env[`TRACKDRIVE_${slot}ROLE`] || '').toLowerCase() === 'primary'
         ? 'primary' : 'reconciliation',
       dids: parseDids(env[`TRACKDRIVE_${slot}DIDS`]),
@@ -1054,13 +1091,18 @@ async function tdReport(acct, category, start, end) {
  * being paid 100% of revenue.
  *
  * Our payout is nowhere in their system — XY7 has no idea what we pay Evolve,
- * Leaders IT or Webster. It comes from TRACKDRIVE_n_PAYOUT_PER_CONVERSION and
- * is accrued only against calls XY7 has actually PAID us for. A conversion
- * they have flagged but not yet priced would otherwise book $180 of payout
- * against $0 of revenue and show the day as a loss; those are counted as
+ * Leaders IT or Webster. It is per-publisher and comes from
+ * TRACKDRIVE_n_PAYOUT_PER_CONVERSION_BY_PUBLISHER, falling back to the
+ * account-wide TRACKDRIVE_n_PAYOUT_PER_CONVERSION for any publisher not
+ * listed. The rate is keyed off the publisher the DID resolves to, so the
+ * attribution has to happen before the payout is worked out.
+ *
+ * Payout accrues only against calls XY7 has actually PAID us for. A conversion
+ * they have flagged but not yet priced would otherwise book a payout against
+ * $0 of revenue and show the day as a loss; those are counted as
  * `pendingConversions` instead.
  */
-function tdRollup(body, dids, payoutPerConversion = 0, tzOffsetMinutes = 0) {
+function tdRollup(body, dids, payoutPerConversion = 0, tzOffsetMinutes = 0, payoutRates = null) {
   const calls = body?.calls ?? [];
   const meta = body?.metadata ?? {};
   const bySource = new Map();
@@ -1076,7 +1118,10 @@ function tdRollup(body, dids, payoutPerConversion = 0, tzOffsetMinutes = 0) {
     // an alias; their `revenue` is deliberately NOT consulted.
     const rev = num(c.traffic_source_payout ?? c.payout);
     const paid = rev > 0;
-    const pay = paid ? payoutPerConversion : 0;
+    // Prefer the dialled number: one DID per publisher is the attribution now.
+    // This has to come first — the payout rate is per publisher.
+    const key = didLabel(dids, c.number_called) || c.traffic_source || 'Unattributed';
+    const pay = paid ? payoutRateFor(payoutRates, payoutPerConversion, key) : 0;
     const flagged = c.traffic_source_converted === true || c.buyer_converted === true;
 
     revenue += rev;
@@ -1092,8 +1137,6 @@ function tdRollup(body, dids, payoutPerConversion = 0, tzOffsetMinutes = 0) {
       hourly[new Date(t.getTime() - tzOffsetMinutes * 60000).getUTCHours()] += rev;
     }
 
-    // Prefer the dialled number: one DID per publisher is the attribution now.
-    const key = didLabel(dids, c.number_called) || c.traffic_source || 'Unattributed';
     const row = bySource.get(key) ?? {
       label: key, calls: 0, revenue: 0, payout: 0, cost: 0, profit: 0, converted: 0, inProgress: 0,
     };
@@ -1133,8 +1176,8 @@ async function trackdriveAccountSnapshot(acct, w, ctx) {
   ]);
 
   const asRows = (v) => (Array.isArray(v) ? v : Array.isArray(v?.rows) ? v.rows : null);
-  const t = tdRollup(today, acct.dids, acct.payoutPerConversion, w.tzOffsetMinutes);
-  const p = tdRollup(prev, acct.dids, acct.payoutPerConversion, w.tzOffsetMinutes);
+  const t = tdRollup(today, acct.dids, acct.payoutPerConversion, w.tzOffsetMinutes, acct.payoutRates);
+  const p = tdRollup(prev, acct.dids, acct.payoutPerConversion, w.tzOffsetMinutes, acct.payoutRates);
 
   const reportedSources = asRows(srcReport);
   const reportedBuyers = asRows(buyerReport);
@@ -1153,8 +1196,8 @@ async function trackdriveAccountSnapshot(acct, w, ctx) {
     buyers: reportedBuyers ?? [],
     campaigns: [],
     yesterday: { totals: p.totals },
-    mtd: tdRollup(mtd, acct.dids, acct.payoutPerConversion).totals,
-    lastMonth: tdRollup(lastMonth, acct.dids, acct.payoutPerConversion).totals,
+    mtd: tdRollup(mtd, acct.dids, acct.payoutPerConversion, 0, acct.payoutRates).totals,
+    lastMonth: tdRollup(lastMonth, acct.dids, acct.payoutPerConversion, 0, acct.payoutRates).totals,
     hourly: t.hourly,
     partial: t.partial,
     live: t.live,
