@@ -42,6 +42,23 @@ TRACKDRIVE_1_DIDS  = "12092556402=Evolve tech,12092556407=Leaders IT,12097064001
 # resolves to, so they must stay spelled as in TRACKDRIVE_1_DIDS. Any
 # publisher not listed falls back to the flat figure below.
 TRACKDRIVE_1_PAYOUT_PER_CONVERSION_BY_PUBLISHER = "Evolve tech=180,Leaders IT=170,Webster=180"
+
+# Which offers on this account are OURS to add, and which are already counted
+# somewhere else. The account role says whether the ACCOUNT can contribute;
+# this says which of its offers do, and one role for the whole account cannot
+# express an account carrying both.
+#
+#   SSDI            primary         runs publisher -> XY7 direct since 16 Sep,
+#                                   reaches no other platform, so it has to count
+#   Final Expense   reconciliation  also routed via Retreaver, so counting it
+#                                   here would double it
+#
+# Matched as a case-insensitive substring of the TrackDrive offer name, which
+# is long: "Social Security Disability (SSDI) - TRANSFERS ONLY - CPA Conversion
+# (TC Retainers)". Anything unmatched is reported as `unmapped` and counted in
+# neither book, so a new offer appearing on the account can never silently
+# land in the figures.
+TRACKDRIVE_1_OFFER_ROLES = "SSDI=primary,Final Expense=reconciliation"
 TRACKDRIVE_1_PAYOUT_PER_CONVERSION = "180"
 
 # ---------------------------------------------------------------------------

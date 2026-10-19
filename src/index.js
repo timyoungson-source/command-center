@@ -909,13 +909,61 @@ function parsePayoutRates(spec) {
   return map;
 }
 
-/** Rate for one publisher label, falling back to the account-wide figure. */
+/**
+ * Rate for one publisher, and whether we actually knew it.
+ *
+ * The flat fallback only applies when NO per-publisher rates are configured.
+ * Once they are, a publisher missing from the map returns 0 and `mapped:
+ * false` rather than quietly inheriting someone else's rate — a $28 Final
+ * Expense conversion inheriting the $180 SSDI rate booked a $152 loss that
+ * never happened.
+ */
 function payoutRateFor(acctRates, fallback, label) {
   if (acctRates && acctRates.size) {
     const hit = acctRates.get(String(label || '').trim().toLowerCase());
-    if (hit !== undefined) return hit;
+    return hit === undefined ? { rate: 0, mapped: false } : { rate: hit, mapped: true };
   }
-  return fallback;
+  return { rate: fallback, mapped: true };
+}
+
+/**
+ * Which offers on this account are OURS to add, and which are already counted
+ * somewhere else.
+ *
+ *   TRACKDRIVE_1_OFFER_ROLES = "SSDI=primary,Final Expense=reconciliation"
+ *
+ * The account-level role says whether the ACCOUNT can contribute; this says
+ * which of its offers do. XY7's account carries both SSDI, which runs direct
+ * and reaches no other platform, and Final Expense, which also routes through
+ * Retreaver and would double-count. One role for the whole account cannot
+ * express that.
+ *
+ * Keys match as a case-insensitive substring of the offer name, because
+ * TrackDrive offer names are long ("Social Security Disability (SSDI) -
+ * TRANSFERS ONLY - CPA Conversion (TC Retainers)").
+ *
+ * Leave it unset and every offer inherits the account role, as before. Set it
+ * and anything unmatched is `unmapped`: reported, never added, never paid out.
+ */
+function parseOfferRoles(spec) {
+  const out = [];
+  if (!spec) return out;
+  for (const pair of String(spec).split(',')) {
+    const i = pair.indexOf('=');
+    if (i < 0) continue;
+    const match = pair.slice(0, i).trim().toLowerCase();
+    const role = pair.slice(i + 1).trim().toLowerCase();
+    if (match && (role === 'primary' || role === 'reconciliation')) out.push({ match, role });
+  }
+  return out;
+}
+
+/** 'primary' | 'reconciliation' | 'unmapped' for one offer name. */
+function offerRoleFor(rules, offerName, accountRole) {
+  if (!rules || !rules.length) return accountRole;
+  const name = String(offerName || '').toLowerCase();
+  for (const r of rules) if (name.includes(r.match)) return r.role;
+  return 'unmapped';
 }
 
 /** Match on the last ten digits so +1 / 1 / bare all resolve the same. */
@@ -941,11 +989,12 @@ function trackdriveAccounts(env) {
     const basic = String(env[`TRACKDRIVE_${slot}BASIC`] || '').trim().replace(/^Basic\s+/i, '');
     const payoutPerConversion = Number(env[`TRACKDRIVE_${slot}PAYOUT_PER_CONVERSION`]) || 0;
     const payoutRates = parsePayoutRates(env[`TRACKDRIVE_${slot}PAYOUT_PER_CONVERSION_BY_PUBLISHER`]);
+    const offerRoles = parseOfferRoles(env[`TRACKDRIVE_${slot}OFFER_ROLES`]);
     if (!basic && !token && !(pub && priv)) continue;
     if (out.some((a) => a.host === host)) continue; // un-numbered duplicating slot 1
     out.push({
       label: env[`TRACKDRIVE_${slot}LABEL`] || host.split('.')[0],
-      host, token, pub, priv, basic, payoutPerConversion, payoutRates,
+      host, token, pub, priv, basic, payoutPerConversion, payoutRates, offerRoles,
       role: String(env[`TRACKDRIVE_${slot}ROLE`] || '').toLowerCase() === 'primary'
         ? 'primary' : 'reconciliation',
       dids: parseDids(env[`TRACKDRIVE_${slot}DIDS`]),
@@ -1031,14 +1080,57 @@ async function tdGet(acct, path, params) {
   return res.json();
 }
 
-async function tdCallsFor(acct, start, end) {
-  return tdGet(acct, 'api/v1/calls', {
-    created_at_from: start,
-    created_at_to: end,
-    per_page: '100',
-    order: 'created_at',
-    order_dir: 'desc',
-  });
+/**
+ * Page caps. Every upstream request spends from Cloudflare's 50-subrequest
+ * budget per invocation, and /api/snapshot already spends it on Retreaver,
+ * Ringba and four TrackDrive windows, so the dashboard gets a smaller cap than
+ * a single /mcp tool call does.
+ */
+const TD_PAGE_SIZE = 100;
+const TD_PAGE_CAP_MCP = 20;       // one tool call per invocation: 2,000 calls
+const TD_PAGE_CAP_SNAPSHOT = 6;   // shares the budget with everything else
+
+/**
+ * Fetch every call in the window, not just the first page.
+ *
+ * This used to request per_page=100 and stop, which silently returned 100 of
+ * 1,776 for a half-month and reported it as if it were the lot. Anything
+ * reading `totals` off that was understating by more than an order of
+ * magnitude — the ledger AND the dashboard's own mtd/lastMonth panels.
+ *
+ * `truncated` is true when the cap was hit before the window was exhausted, so
+ * a short count is always visible rather than inferred.
+ */
+async function tdCallsFor(acct, start, end, maxPages = TD_PAGE_CAP_MCP) {
+  const all = [];
+  let meta = null;
+  let truncated = false;
+
+  for (let page = 1; ; page++) {
+    const body = await tdGet(acct, 'api/v1/calls', {
+      created_at_from: start,
+      created_at_to: end,
+      per_page: String(TD_PAGE_SIZE),
+      page: String(page),
+      order: 'created_at',
+      order_dir: 'desc',
+    });
+    const calls = body?.calls ?? [];
+    if (meta === null) meta = body?.metadata ?? {};
+    all.push(...calls);
+
+    const total = body?.metadata?.total_count;
+    const done = calls.length < TD_PAGE_SIZE
+      || (Number.isFinite(total) && all.length >= total);
+    if (done) break;
+    if (page >= maxPages) { truncated = true; break; }
+  }
+
+  return {
+    calls: all,
+    metadata: { ...(meta ?? {}), total_count: meta?.total_count ?? all.length },
+    truncated,
+  };
 }
 
 /**
@@ -1102,40 +1194,73 @@ async function tdReport(acct, category, start, end) {
  * $0 of revenue and show the day as a loss; those are counted as
  * `pendingConversions` instead.
  */
-function tdRollup(body, dids, payoutPerConversion = 0, tzOffsetMinutes = 0, payoutRates = null) {
+function tdRollup(body, acct, tzOffsetMinutes = 0) {
   const calls = body?.calls ?? [];
   const meta = body?.metadata ?? {};
+  const dids = acct?.dids;
+  const rules = acct?.offerRoles;
+  const accountRole = acct?.role ?? 'reconciliation';
+
   const bySource = new Map();
+  const byOffer = new Map();
   const hourly = Array.from({ length: 24 }, () => 0);
-  let revenue = 0;
-  let payout = 0;
-  let connected = 0;
-  let converted = 0;
-  let pendingConversions = 0;
+  const unmappedOffers = new Set();
+  const unmappedPublishers = new Set();
+
+  const blank = () => ({
+    calls: 0, revenue: 0, payout: 0, cost: 0, profit: 0,
+    connected: 0, converted: 0, pendingConversions: 0,
+  });
+  const book = { primary: blank(), reconciliation: blank(), unmapped: blank() };
 
   for (const c of calls) {
     // What XY7 owes us for this call. Their `payout` is the same figure under
-    // an alias; their `revenue` is deliberately NOT consulted.
+    // an alias; their `revenue` is their own margin and is NOT consulted.
     const rev = num(c.traffic_source_payout ?? c.payout);
     const paid = rev > 0;
-    // Prefer the dialled number: one DID per publisher is the attribution now.
-    // This has to come first — the payout rate is per publisher.
-    const key = didLabel(dids, c.number_called) || c.traffic_source || 'Unattributed';
-    const pay = paid ? payoutRateFor(payoutRates, payoutPerConversion, key) : 0;
     const flagged = c.traffic_source_converted === true || c.buyer_converted === true;
+    const connectedCall = num(c.total_duration ?? c.duration) > 0;
 
-    revenue += rev;
-    payout += pay;
-    if (paid) converted++;
-    else if (flagged) pendingConversions++;
-    // TrackDrive records keep their own field names — not the flattened
-    // Retreaver shape — so duration is read directly.
-    if (num(c.total_duration ?? c.duration) > 0) connected++;
+    const offer = String(c.offer ?? c.user_offer_id ?? 'Unknown offer');
+    const role = offerRoleFor(rules, offer, accountRole);
+    if (role === 'unmapped') unmappedOffers.add(offer);
+
+    // Attribution comes from the dialled number: one DID per publisher.
+    // It has to be resolved before the payout, which is per publisher.
+    const key = didLabel(dids, c.number_called) || c.traffic_source || 'Unattributed';
+
+    // Payout is only ever owed on offers that are ours to book. A
+    // reconciliation offer is already counted elsewhere, so paying out against
+    // it here would double the cost as well as the revenue.
+    let pay = 0;
+    if (role === 'primary' && paid) {
+      const r = payoutRateFor(acct?.payoutRates, acct?.payoutPerConversion ?? 0, key);
+      pay = r.rate;
+      if (!r.mapped) unmappedPublishers.add(key);
+    }
+
+    const b = book[role] ?? book.unmapped;
+    b.calls++;
+    b.revenue += rev;
+    b.payout += pay;
+    b.profit += rev - pay;
+    if (paid) b.converted++;
+    else if (flagged) b.pendingConversions++;
+    if (connectedCall) b.connected++;
+
+    const o = byOffer.get(offer) ?? { offer, role, calls: 0, revenue: 0, payout: 0, converted: 0 };
+    o.calls++;
+    o.revenue += rev;
+    o.payout += pay;
+    if (paid) o.converted++;
+    byOffer.set(offer, o);
+
+    // Only primary money reaches the hourly curve and the publisher table —
+    // both feed the figures people read as ours.
+    if (role !== 'primary') continue;
 
     const t = new Date(c.created_at);
-    if (!isNaN(t)) {
-      hourly[new Date(t.getTime() - tzOffsetMinutes * 60000).getUTCHours()] += rev;
-    }
+    if (!isNaN(t)) hourly[new Date(t.getTime() - tzOffsetMinutes * 60000).getUTCHours()] += rev;
 
     const row = bySource.get(key) ?? {
       label: key, calls: 0, revenue: 0, payout: 0, cost: 0, profit: 0, converted: 0, inProgress: 0,
@@ -1148,36 +1273,50 @@ function tdRollup(body, dids, payoutPerConversion = 0, tzOffsetMinutes = 0, payo
     bySource.set(key, row);
   }
 
+  const fetched = calls.length;
+  const total = meta.total_count ?? fetched;
+
   return {
+    // `totals` is PRIMARY ONLY — the figure that is safe to add to the ledger.
     totals: {
-      calls: meta.total_count ?? calls.length,
-      revenue, payout, cost: 0, profit: revenue - payout,
-      connected, converted, pendingConversions,
+      ...book.primary,
+      calls: book.primary.calls,
+      callsSeen: fetched,
+      callsReported: total,
       inProgress: meta.in_progress_count ?? 0,
     },
+    // Fetched and shown so the two books can be compared, never added.
+    reconciliation: book.reconciliation,
+    // Offers with no role configured: counted nowhere until someone says.
+    unmapped: book.unmapped,
+    byOffer: [...byOffer.values()],
+    unmappedOffers: [...unmappedOffers],
+    unmappedPublishers: [...unmappedPublishers],
     publishers: [...bySource.values()],
     hourly,
-    partial: (meta.total_count ?? 0) > calls.length,
+    truncated: body?.truncated === true,
+    partial: body?.truncated === true || total > fetched,
     live: meta.in_progress_count ?? 0,
   };
 }
+
 
 const ZERO = { calls: 0, revenue: 0, payout: 0, cost: 0, profit: 0, converted: 0, inProgress: 0 };
 
 async function trackdriveAccountSnapshot(acct, w, ctx) {
   const id = acct.host;
   const [today, prev, mtd, lastMonth, srcReport, buyerReport] = await Promise.all([
-    cached(ctx, `td:${id}:today:${w.start}`, 55, () => tdCallsFor(acct, w.start, w.end)),
-    cached(ctx, `td:${id}:prev:${w.prevStart}`, 900, () => tdCallsFor(acct, w.prevStart, w.start)),
-    cached(ctx, `td:${id}:mtd:${w.monthStart}:${w.end}`, 600, () => tdCallsFor(acct, w.monthStart, w.end)),
-    cached(ctx, `td:${id}:lm:${w.prevMonthStart}`, 3600, () => tdCallsFor(acct, w.prevMonthStart, w.monthStart)),
+    cached(ctx, `td:${id}:today:${w.start}`, 55, () => tdCallsFor(acct, w.start, w.end, TD_PAGE_CAP_SNAPSHOT)),
+    cached(ctx, `td:${id}:prev:${w.prevStart}`, 900, () => tdCallsFor(acct, w.prevStart, w.start, TD_PAGE_CAP_SNAPSHOT)),
+    cached(ctx, `td:${id}:mtd:${w.monthStart}:${w.end}`, 600, () => tdCallsFor(acct, w.monthStart, w.end, TD_PAGE_CAP_SNAPSHOT)),
+    cached(ctx, `td:${id}:lm:${w.prevMonthStart}`, 3600, () => tdCallsFor(acct, w.prevMonthStart, w.monthStart, TD_PAGE_CAP_SNAPSHOT)),
     cached(ctx, `td:${id}:rsrc:${w.start}`, 115, () => tdReport(acct, 'traffic_source', w.start, w.end).then((r) => r ?? { unavailable: true })),
     cached(ctx, `td:${id}:rbuy:${w.start}`, 115, () => tdReport(acct, 'buyer', w.start, w.end).then((r) => r ?? { unavailable: true })),
   ]);
 
   const asRows = (v) => (Array.isArray(v) ? v : Array.isArray(v?.rows) ? v.rows : null);
-  const t = tdRollup(today, acct.dids, acct.payoutPerConversion, w.tzOffsetMinutes, acct.payoutRates);
-  const p = tdRollup(prev, acct.dids, acct.payoutPerConversion, w.tzOffsetMinutes, acct.payoutRates);
+  const t = tdRollup(today, acct, w.tzOffsetMinutes);
+  const p = tdRollup(prev, acct, w.tzOffsetMinutes);
 
   const reportedSources = asRows(srcReport);
   const reportedBuyers = asRows(buyerReport);
@@ -1196,8 +1335,8 @@ async function trackdriveAccountSnapshot(acct, w, ctx) {
     buyers: reportedBuyers ?? [],
     campaigns: [],
     yesterday: { totals: p.totals },
-    mtd: tdRollup(mtd, acct.dids, acct.payoutPerConversion, 0, acct.payoutRates).totals,
-    lastMonth: tdRollup(lastMonth, acct.dids, acct.payoutPerConversion, 0, acct.payoutRates).totals,
+    mtd: tdRollup(mtd, acct).totals,
+    lastMonth: tdRollup(lastMonth, acct).totals,
     hourly: t.hourly,
     partial: t.partial,
     live: t.live,
@@ -1704,6 +1843,7 @@ async function mcpCallTool(name, args, env) {
       dids: Object.fromEntries(a.dids),
       payoutPerConversion: a.payoutPerConversion,
       payoutRatesByPublisher: Object.fromEntries(a.payoutRates ?? []),
+      offerRoles: (a.offerRoles ?? []).map((r) => `${r.match} -> ${r.role}`),
     }));
   }
 
@@ -1713,16 +1853,41 @@ async function mcpCallTool(name, args, env) {
 
   if (name === 'trackdrive_rollup') {
     const body = await tdCallsFor(acct, start, end);
-    const r = tdRollup(body, acct.dids, acct.payoutPerConversion, 0, acct.payoutRates);
+    const r = tdRollup(body, acct);
+    const warnings = [];
+    if (r.truncated) {
+      warnings.push(
+        `Page cap hit: ${r.totals.callsSeen} of ${r.totals.callsReported} calls fetched. ` +
+        'Totals are a floor, not a total. Narrow the window.'
+      );
+    }
+    if (r.unmappedOffers.length) {
+      warnings.push(
+        `Offers with no role in TRACKDRIVE_n_OFFER_ROLES, counted nowhere: ${r.unmappedOffers.join('; ')}`
+      );
+    }
+    if (r.unmappedPublishers.length) {
+      warnings.push(
+        `Publishers with no payout rate, booked at 0: ${r.unmappedPublishers.join('; ')}`
+      );
+    }
     return {
-      account: acct.label, host: acct.host, role: acct.role,
+      account: acct.label, host: acct.host, accountRole: acct.role,
       window: { start, end },
+      // Safe to add to the ledger: offers marked primary only.
       totals: r.totals,
       publishers: r.publishers,
-      partial: r.partial,
-      note: r.partial
-        ? 'More calls exist than were fetched in one page. Narrow the window before trusting totals.'
-        : null,
+      // Already counted elsewhere (e.g. still routed via Retreaver). Shown for
+      // comparison, never added.
+      reconciliation: r.reconciliation,
+      // No role configured yet, so counted in neither book.
+      unmapped: r.unmapped,
+      byOffer: r.byOffer,
+      unmappedOffers: r.unmappedOffers,
+      unmappedPublishers: r.unmappedPublishers,
+      truncated: r.truncated,
+      complete: !r.partial,
+      warnings: warnings.length ? warnings : null,
     };
   }
 
@@ -1732,8 +1897,13 @@ async function mcpCallTool(name, args, env) {
     const calls = (body?.calls ?? []).slice(0, limit).map((c) => ({
       created_at: c.created_at,
       number_called: c.number_called,
+      // Needed to settle a double-count the hard way: the same caller at the
+      // same minute in both platforms proves a call was routed through
+      // Retreaver before reaching this account.
+      caller_number: c.caller_number ?? null,
       publisher: didLabel(acct.dids, c.number_called) || c.traffic_source || 'Unattributed',
       offer: c.offer ?? c.user_offer_id ?? null,
+      offerRole: offerRoleFor(acct.offerRoles, c.offer ?? c.user_offer_id, acct.role),
       traffic_source: c.traffic_source ?? null,
       our_revenue: num(c.traffic_source_payout ?? c.payout),
       their_margin_not_ours: c.revenue ?? c.buyer_revenue ?? null,
@@ -1745,7 +1915,9 @@ async function mcpCallTool(name, args, env) {
       account: acct.label, host: acct.host,
       window: { start, end },
       returned: calls.length,
+      fetched: (body?.calls ?? []).length,
       totalCount: body?.metadata?.total_count ?? null,
+      truncated: body?.truncated === true,
       calls,
     };
   }

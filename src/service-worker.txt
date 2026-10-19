@@ -9,10 +9,13 @@
  * the app knowing — the app reads the `x-cc-cached-at` header and says so.
  */
 
-const SHELL = 'cc-shell-v1';
+const SHELL = 'cc-shell-v2';
 const DATA = 'cc-data-v1';
 
-const SHELL_URLS = ['/', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];
+// '/' is deliberately NOT precached. It sits behind the passphrase, so on a
+// device that has never signed in addAll() would get a 401, reject, and the
+// service worker would fail to install at all.
+const SHELL_URLS = ['/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -74,7 +77,33 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Shell: cache first, refresh in the background.
+  // Navigations: NETWORK first, cache only as an offline fallback.
+  //
+  // Cache-first here is what broke the installed app. The shell rendered
+  // straight from cache, so the worker never got a chance to answer with the
+  // passphrase page; meanwhile every /api/ call came back 401 and the board
+  // sat there loaded and empty. An installed PWA keeps its own cookie jar,
+  // separate from the browser it was installed from, so it starts signed out
+  // and has to be able to reach that login page.
+  //
+  // Only an ok response is cached, so a 401 login page never becomes the
+  // cached shell.
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request)
+        .then((res) => {
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(SHELL).then((c) => c.put('/', copy));
+          }
+          return res;
+        })
+        .catch(() => caches.match('/').then((hit) => hit || Response.error()))
+    );
+    return;
+  }
+
+  // Everything else (icons, manifest): cache first, refresh in the background.
   event.respondWith(
     caches.match(request).then((hit) => {
       const network = fetch(request)

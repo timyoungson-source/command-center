@@ -931,6 +931,37 @@ tbody tr:last-child td{border-bottom:none;}
     svg.innerHTML=g;
   }
 
+  /* ---------- signed out ---------- */
+  /* A 401 used to surface as the string "Service returned 401" in the error
+     slot, which reads as a platform fault rather than "you are signed out" —
+     and offered no way to do anything about it. */
+  function needsSignIn(){
+    stopTimer();
+    if(document.getElementById("authgate")) return;
+    var el = document.createElement("div");
+    el.id = "authgate";
+    el.setAttribute("role","alertdialog");
+    el.setAttribute("aria-label","Signed out");
+    el.style.cssText = "position:fixed;inset:0;z-index:999;display:grid;place-items:center;"
+      + "background:rgba(12,15,17,.92);padding:24px";
+    el.innerHTML =
+      '<div style="max-width:340px;text-align:center;background:var(--surface,#161a1d);'
+      + 'border:1px solid var(--rule,#272e31);border-radius:12px;padding:24px">'
+      + '<h2 style="margin:0 0 8px;font-size:17px">Signed out</h2>'
+      + '<p style="margin:0 0 18px;font-size:13px;line-height:1.5;color:var(--ink-3,#7d8b8d)">'
+      + 'This app keeps its own sign-in, separate from your browser. '
+      + 'Enter the passphrase once and it is remembered for 30 days.</p>'
+      + '<button type="button" id="authgo" style="width:100%;padding:11px 16px;font:inherit;'
+      + 'font-size:14px;border:0;border-radius:8px;background:var(--accent,#2fbccc);'
+      + 'color:#07262a;font-weight:600">Sign in</button></div>';
+    document.body.appendChild(el);
+    document.getElementById("authgo").addEventListener("click", function(){
+      /* Cache-busted so no layer can answer this from a stored copy; the
+         worker replies with the passphrase page. */
+      location.replace("/?signin=" + Date.now());
+    });
+  }
+
   /* ---------- loading ---------- */
   function load(){
     var btn=document.getElementById("refresh");
@@ -938,6 +969,7 @@ tbody tr:last-child td{border-bottom:none;}
     return fetch("/api/snapshot?"+windowParams().toString(), {headers:{accept:"application/json"}})
       .then(function(res){
         S.offlineAt = res.headers.get("x-cc-cached-at");
+        if(res.status === 401){ needsSignIn(); throw new Error("signed out"); }
         if(!res.ok && !S.offlineAt) throw new Error("Service returned "+res.status);
         return res.json();
       })
